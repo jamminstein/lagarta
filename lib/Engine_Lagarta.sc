@@ -1,10 +1,12 @@
 // Engine_Lagarta
 // Ciat-Lonbarde synthesis for norns
 //
-// Three interacting sections:
+// Five interacting sections:
 //   QUANTUSSY - 5 cross-modulated bounds oscillators in a ring
+//   ROLZ      - 4 chaotic rhythm oscillators with cascading comparators
 //   CLICKER   - dual impulse voices with ring modulation
 //   GONGS     - resonant bodies excited by clicks
+//   INPUT     - external audio through wavefolder and gongs
 //
 // Inspired by Peter Blasser's paper circuits:
 //   bounds oscillators, banana jack patching,
@@ -24,20 +26,27 @@ Engine_Lagarta : CroneEngine {
         // quantussy ring
         q_freq1=55, q_freq2=82, q_freq3=131, q_freq4=196, q_freq5=330,
         q_bounds=0.5, q_cross=0.3, q_mix=0.5, q_fold=0.5,
+        // rolz (Plumbutter-style chaotic rhythm)
+        rolz_r1=1.0, rolz_r2=2.3, rolz_r3=4.7, rolz_r4=0.6,
+        rolz_cascade=0.5, rolz_to_click=0,
         // clicker
         click_rate=3, click_decay=0.008, click_pitch=800,
         click_ring=0.5, click_amp=0.5, click_free=1,
-        t_click=0, // trigger arg (auto-resets)
+        t_click=0,
         // gongs
         gong1=400, gong2=633, gong3=1048, gong4=1672,
         gong_decay=1.5, gong_amp=0.3,
+        // audio input
+        input_gain=0, input_fold=0, input_to_gong=0, input_mix=0,
         // global
         chaos=0.3, drift=0.1;
 
       var fb, q1, q2, q3, q4, q5, quantussy;
+      var r1, r2, r3, r4, r1_trig, r2_trig, r3_trig, r4_trig, rolz_trig;
       var int_trig, ext_trig, dust_trig, trig;
       var click_env, click1, click2, clicker;
       var gong_in, gongs;
+      var input_sig, input_folded;
       var sig;
 
       // ---- QUANTUSSY RING ----
@@ -90,6 +99,30 @@ Engine_Lagarta : CroneEngine {
       quantussy = Fold.ar(quantussy * (1 + (q_fold * 4)), q_bounds.neg, q_bounds);
       quantussy = quantussy * q_mix;
 
+      // ---- ROLZ ----
+      // Plumbutter-style cascading rhythm oscillators
+      // 4 sub-audio LFOs with comparators
+      // each comparator output modulates the next oscillator's rate
+      // creates emergent polyrhythmic patterns — no two bars the same
+
+      r1 = LFSaw.ar(rolz_r1 + (LFNoise2.kr(0.07) * drift * rolz_r1 * 0.1));
+      r1_trig = Trig1.ar(r1 - 0, SampleDur.ir * 2);
+
+      r2 = LFSaw.ar(rolz_r2 + (r1_trig * rolz_cascade * rolz_r2 * 0.5)
+        + (LFNoise2.kr(0.09) * drift * rolz_r2 * 0.1));
+      r2_trig = Trig1.ar(r2 - 0, SampleDur.ir * 2);
+
+      r3 = LFSaw.ar(rolz_r3 + (r2_trig * rolz_cascade * rolz_r3 * 0.5)
+        + (LFNoise2.kr(0.11) * drift * rolz_r3 * 0.1));
+      r3_trig = Trig1.ar(r3 - 0, SampleDur.ir * 2);
+
+      r4 = LFSaw.ar(rolz_r4 + (r3_trig * rolz_cascade * rolz_r4 * 0.5)
+        + (LFNoise2.kr(0.13) * drift * rolz_r4 * 0.1));
+      r4_trig = Trig1.ar(r4 - 0, SampleDur.ir * 2);
+
+      // sum rolz triggers and route to clicker
+      rolz_trig = (r1_trig + r2_trig + r3_trig + r4_trig) * rolz_to_click;
+
       // ---- CLICKER ----
       // "an orchestra in a microsecond"
       // dual impulse voices: very short AD envelopes
@@ -101,7 +134,7 @@ Engine_Lagarta : CroneEngine {
       ) * click_free;
       ext_trig = Trig1.ar(K2A.ar(t_click), SampleDur.ir);
       dust_trig = Dust.ar(chaos * 8);
-      trig = int_trig + ext_trig + dust_trig;
+      trig = int_trig + ext_trig + dust_trig + rolz_trig;
 
       click_env = EnvGen.ar(Env.perc(0.00005, click_decay), trig);
 
@@ -124,6 +157,15 @@ Engine_Lagarta : CroneEngine {
       // each gong decays at a different rate for spectral evolution
 
       gong_in = clicker + (dust_trig * 0.2);
+
+      // ---- AUDIO INPUT ----
+      // external audio through wavefolder and into gong excitation
+      // plug in guitar, contact mic, field recording — it all becomes CL material
+
+      input_sig = SoundIn.ar([0, 1]).sum * input_gain;
+      input_folded = Fold.ar(input_sig * (1 + (input_fold * 4)), -0.5, 0.5);
+      gong_in = gong_in + (input_folded * input_to_gong);
+
       gongs = Mix([
         Ringz.ar(gong_in, gong1 + (LFNoise2.kr(0.1) * drift * 20), gong_decay),
         Ringz.ar(gong_in, gong2 + (LFNoise2.kr(0.13) * drift * 30), gong_decay * 0.75),
@@ -132,7 +174,7 @@ Engine_Lagarta : CroneEngine {
       ]) * 0.12 * gong_amp;
 
       // ---- MIX + OUTPUT ----
-      sig = quantussy + clicker + gongs;
+      sig = quantussy + clicker + gongs + (input_folded * input_mix);
       sig = LeakDC.ar(sig);
       sig = sig.tanh; // soft saturation
       sig = sig * amp;
@@ -160,6 +202,14 @@ Engine_Lagarta : CroneEngine {
     this.addCommand("q_mix", "f", { arg msg; synth.set(\q_mix, msg[1]); });
     this.addCommand("q_fold", "f", { arg msg; synth.set(\q_fold, msg[1]); });
 
+    // rolz
+    this.addCommand("rolz_r1", "f", { arg msg; synth.set(\rolz_r1, msg[1]); });
+    this.addCommand("rolz_r2", "f", { arg msg; synth.set(\rolz_r2, msg[1]); });
+    this.addCommand("rolz_r3", "f", { arg msg; synth.set(\rolz_r3, msg[1]); });
+    this.addCommand("rolz_r4", "f", { arg msg; synth.set(\rolz_r4, msg[1]); });
+    this.addCommand("rolz_cascade", "f", { arg msg; synth.set(\rolz_cascade, msg[1]); });
+    this.addCommand("rolz_to_click", "f", { arg msg; synth.set(\rolz_to_click, msg[1]); });
+
     // clicker
     this.addCommand("click_rate", "f", { arg msg; synth.set(\click_rate, msg[1]); });
     this.addCommand("click_decay", "f", { arg msg; synth.set(\click_decay, msg[1]); });
@@ -176,6 +226,12 @@ Engine_Lagarta : CroneEngine {
     this.addCommand("gong4", "f", { arg msg; synth.set(\gong4, msg[1]); });
     this.addCommand("gong_decay", "f", { arg msg; synth.set(\gong_decay, msg[1]); });
     this.addCommand("gong_amp", "f", { arg msg; synth.set(\gong_amp, msg[1]); });
+
+    // audio input
+    this.addCommand("input_gain", "f", { arg msg; synth.set(\input_gain, msg[1]); });
+    this.addCommand("input_fold", "f", { arg msg; synth.set(\input_fold, msg[1]); });
+    this.addCommand("input_to_gong", "f", { arg msg; synth.set(\input_to_gong, msg[1]); });
+    this.addCommand("input_mix", "f", { arg msg; synth.set(\input_mix, msg[1]); });
 
     // global
     this.addCommand("chaos", "f", { arg msg; synth.set(\chaos, msg[1]); });
