@@ -300,15 +300,12 @@ function init()
   g = grid.connect()
   g.key = grid_key
 
-  -- clocks (with startup delay to let engine initialize)
-  clock.run(function()
-    clock.sleep(0.5)
-    clock.run(click_clock)
-    clock.run(screen_clock)
-    clock.run(sim_clock)
-    clock.run(grid_redraw_clock)
-    clock.run(gesture_clock)
-  end)
+  -- clocks
+  clock.run(screen_clock)
+  clock.run(sim_clock)
+  clock.run(grid_redraw_clock)
+  clock.run(safe_click_clock)
+  clock.run(safe_gesture_clock)
 
   params:bang()
 end
@@ -430,11 +427,11 @@ end
 -- clocks
 ------------------------------------------------------------
 
-function click_clock()
+function safe_click_clock()
+  clock.sleep(1)
   while true do
     local div = DIV_VALUES[params:get("click_div")]
-    local ok, err = pcall(function() clock.sync(div) end)
-    if not ok then clock.sleep(0.25) end
+    clock.sleep(div * clock.get_beat_sec())
     if params:get("click_sync") == 2 then
       local jitter = params:get("chaos") * 0.015
       if jitter > 0.001 then clock.sleep(math.random() * jitter) end
@@ -620,7 +617,7 @@ end
 
 function caterpillar_clock()
   while cat_active do
-    clock.sync(1)
+    clock.sleep(clock.get_beat_sec())
     cat_tick = cat_tick + 1
 
     local agg = cat_aggression
@@ -790,10 +787,10 @@ function record_gesture(param_id, value)
   end
 end
 
-function gesture_clock()
+function safe_gesture_clock()
+  clock.sleep(1)
   while true do
-    local ok, err = pcall(function() clock.sync(1/16) end)
-    if not ok then clock.sleep(0.1) end
+    clock.sleep(clock.get_beat_sec() / 4)
     local beats = clock.get_beats()
     if beats then
       local bars = ({2, 4, 8, 16})[params:get("gesture_bars")]
