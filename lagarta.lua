@@ -149,9 +149,9 @@ function init()
   params:set_action("amp", function(v) engine.amp(v) end)
   params:set_action("grid_mode", function(v) grid_mode = v; grid_dirty = true end)
 
-  -- QUANTUSSY
+  -- QUANTUSSY (lower defaults for more bass weight)
   params:add_group("quantussy", "QUANTUSSY", 9)
-  local q_freqs = {55, 82, 131, 196, 330}
+  local q_freqs = {36, 55, 82, 131, 196}
   for i = 1, 5 do
     local id = "q_freq" .. i
     params:add_control(id, "osc " .. i .. " freq",
@@ -167,11 +167,32 @@ function init()
   params:set_action("q_bounds", function(v) engine.q_bounds(v) end)
   params:set_action("q_mix", function(v) engine.q_mix(v) end)
 
+  -- SUB + BASS
+  params:add_group("sub_bass", "SUB + BASS", 9)
+  params:add_control("sub_freq", "sub freq", controlspec.new(15, 200, 'exp', 0, 36, "hz"))
+  params:add_control("sub_level", "sub level", controlspec.new(0, 1, 'lin', 0, 0.4))
+  params:add_control("sub_width", "sub width", controlspec.new(0.05, 0.95, 'lin', 0, 0.3))
+  params:add_control("bass_freq", "bass body freq", controlspec.new(20, 200, 'exp', 0, 55, "hz"))
+  params:add_control("bass_decay", "bass body decay", controlspec.new(0.05, 2, 'exp', 0, 0.25, "s"))
+  params:add_control("bass_level", "bass body level", controlspec.new(0, 1, 'lin', 0, 0.4))
+  params:add_control("bass_click_pitch", "bass click pitch", controlspec.new(20, 400, 'exp', 0, 80, "hz"))
+  params:add_control("bass_click_decay", "bass click decay", controlspec.new(0.01, 0.5, 'exp', 0, 0.08, "s"))
+  params:add_control("bass_click_amp", "bass click level", controlspec.new(0, 1, 'lin', 0, 0.4))
+  params:set_action("sub_freq", function(v) engine.sub_freq(v) end)
+  params:set_action("sub_level", function(v) engine.sub_level(v) end)
+  params:set_action("sub_width", function(v) engine.sub_width(v) end)
+  params:set_action("bass_freq", function(v) engine.bass_freq(v) end)
+  params:set_action("bass_decay", function(v) engine.bass_decay(v) end)
+  params:set_action("bass_level", function(v) engine.bass_level(v) end)
+  params:set_action("bass_click_pitch", function(v) engine.bass_click_pitch(v) end)
+  params:set_action("bass_click_decay", function(v) engine.bass_click_decay(v) end)
+  params:set_action("bass_click_amp", function(v) engine.bass_click_amp(v) end)
+
   -- CLICKER
   params:add_group("clicker", "CLICKER", 9)
   params:add_control("click_rate", "rate", controlspec.new(0.1, 40, 'exp', 0, 3, "hz"))
-  params:add_control("click_decay", "decay", controlspec.new(0.001, 0.5, 'exp', 0, 0.008, "s"))
-  params:add_control("click_pitch", "pitch", controlspec.new(100, 8000, 'exp', 0, 800, "hz"))
+  params:add_control("click_decay", "decay", controlspec.new(0.001, 0.5, 'exp', 0, 0.03, "s"))
+  params:add_control("click_pitch", "pitch", controlspec.new(20, 8000, 'exp', 0, 200, "hz"))
   params:add_control("click_ring", "ring mod", controlspec.new(0, 1, 'lin', 0, 0.5))
   params:add_control("click_amp", "click level", controlspec.new(0, 1, 'lin', 0, 0.5))
   params:add_option("click_sync", "sync", {"free", "clock"}, 1)
@@ -188,7 +209,7 @@ function init()
 
   -- GONGS
   params:add_group("gongs", "GONGS", 6)
-  local gf = {400, 633, 1048, 1672}
+  local gf = {80, 220, 580, 1200}
   for i = 1, 4 do
     local id = "gong" .. i
     params:add_control(id, "gong " .. i .. " freq",
@@ -237,6 +258,13 @@ function init()
   params:set_action("input_fold", function(v) engine.input_fold(v) end)
   params:set_action("input_to_gong", function(v) engine.input_to_gong(v) end)
   params:set_action("input_mix", function(v) engine.input_mix(v) end)
+
+  -- WARMTH
+  params:add_group("warmth", "WARMTH", 2)
+  params:add_control("lpf_freq", "filter freq", controlspec.new(200, 12000, 'exp', 0, 6000, "hz"))
+  params:add_control("lpf_res", "filter res", controlspec.new(0.01, 1, 'exp', 0, 0.1))
+  params:set_action("lpf_freq", function(v) engine.lpf_freq(v) end)
+  params:set_action("lpf_res", function(v) engine.lpf_res(v) end)
 
   -- CATERPILLAR
   params:add_group("caterpillar", "CATERPILLAR", 6)
@@ -408,7 +436,12 @@ function click_clock()
       if jitter > 0.001 then clock.sleep(math.random() * jitter) end
       if params:get("music_mode") == 2 then
         local note = get_music_note()
-        engine.click_pitch(musicutil.note_num_to_freq(note))
+        local freq = musicutil.note_num_to_freq(note)
+        engine.click_pitch(freq)
+        -- bass tracks the melody one octave down
+        engine.bass_click_pitch(musicutil.note_num_to_freq(math.max(note - 12, 20)))
+        -- sub follows root of current note's octave
+        engine.sub_freq(musicutil.note_num_to_freq(math.max(note - 24, 15)))
       end
       engine.trig(1)
       click_flash = 1
@@ -608,6 +641,10 @@ function caterpillar_clock()
       if math.random() < 0.3 then nudge("click_rate", 0.2 * agg, 0.1, 40) end
       if math.random() < 0.2 then nudge("rolz_to_click", 0.02 * agg, 0, 1) end
       if math.random() < 0.2 then nudge("rolz_cascade", 0.01 * agg, 0, 1) end
+      -- bass surges: increase weight
+      if math.random() < 0.2 then nudge("sub_level", 0.02 * agg, 0, 1) end
+      if math.random() < 0.2 then nudge("bass_click_amp", 0.02 * agg, 0, 1) end
+      if math.random() < 0.15 then nudge_mul("bass_freq", 0.95 + math.random() * 0.1, 20, 200) end
       cat_speed = 0.5
 
     elseif cat_phase == 3 then -- RUPTURE: maximum chaos
@@ -618,6 +655,10 @@ function caterpillar_clock()
       nudge("q_fold", 0.03 * agg, 0, 1)
       nudge("chaos", 0.02 * agg, 0, 1)
       if math.random() < 0.4 then nudge("click_rate", (math.random() - 0.3) * 2 * agg, 0.1, 40) end
+      -- bass goes wild: pitch shifts, level spikes
+      if math.random() < 0.3 then nudge_mul("bass_click_pitch", 0.8 + math.random() * 0.4, 20, 400) end
+      if math.random() < 0.3 then nudge_mul("sub_freq", 0.85 + math.random() * 0.3, 15, 200) end
+      if math.random() < 0.2 then nudge("bass_click_decay", (math.random() - 0.5) * 0.03 * agg, 0.01, 0.5) end
       if math.random() < 0.3 then
         local gi = math.random(1, 4)
         nudge_mul("gong" .. gi, 0.9 + math.random() * 0.2, 50, 5000)
@@ -781,7 +822,10 @@ function grid_key(x, y, z)
       local degree = util.clamp(x, 1, #scale_notes)
       local note = (scale_notes[degree] or 60) + octave * 12
       note = util.clamp(note, 20, 120)
-      engine.click_pitch(musicutil.note_num_to_freq(note))
+      local note_freq = musicutil.note_num_to_freq(note)
+      engine.click_pitch(note_freq)
+      engine.bass_click_pitch(musicutil.note_num_to_freq(math.max(note - 12, 20)))
+      engine.sub_freq(musicutil.note_num_to_freq(math.max(note - 24, 15)))
       engine.trig(1)
       click_flash = 1
       for i = 1, 4 do
@@ -925,7 +969,10 @@ function key(n, z)
       -- manual click
       if params:get("music_mode") == 2 then
         local note = get_music_note()
-        engine.click_pitch(musicutil.note_num_to_freq(note))
+        local freq = musicutil.note_num_to_freq(note)
+        engine.click_pitch(freq)
+        engine.bass_click_pitch(musicutil.note_num_to_freq(math.max(note - 12, 20)))
+        engine.sub_freq(musicutil.note_num_to_freq(math.max(note - 24, 15)))
       end
       engine.trig(1)
       click_flash = 1

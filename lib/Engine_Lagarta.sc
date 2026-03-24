@@ -1,17 +1,15 @@
 // Engine_Lagarta
 // Ciat-Lonbarde synthesis for norns
 //
-// Five interacting sections:
+// Six interacting sections:
 //   QUANTUSSY - 5 cross-modulated bounds oscillators in a ring
+//   SUB       - sub bass tracking quantussy fundamentals
 //   ROLZ      - 4 chaotic rhythm oscillators with cascading comparators
 //   CLICKER   - dual impulse voices with ring modulation
-//   GONGS     - resonant bodies excited by clicks
+//   GONGS     - resonant bodies excited by clicks (tuned low to high)
 //   INPUT     - external audio through wavefolder and gongs
 //
-// Inspired by Peter Blasser's paper circuits:
-//   bounds oscillators, banana jack patching,
-//   chaotic cross-modulation, and the philosophy
-//   that narrowing bounds raises pitch AND lowers amplitude
+// Inspired by Peter Blasser's paper circuits
 
 Engine_Lagarta : CroneEngine {
   var synth;
@@ -24,36 +22,46 @@ Engine_Lagarta : CroneEngine {
     SynthDef(\lagarta, {
       arg out=0, amp=0.5,
         // quantussy ring
-        q_freq1=55, q_freq2=82, q_freq3=131, q_freq4=196, q_freq5=330,
+        q_freq1=36, q_freq2=55, q_freq3=82, q_freq4=131, q_freq5=196,
         q_bounds=0.5, q_cross=0.3, q_mix=0.5, q_fold=0.5,
+        // sub bass
+        sub_freq=36, sub_level=0.4, sub_width=0.3,
         // rolz (Plumbutter-style chaotic rhythm)
         rolz_r1=1.0, rolz_r2=2.3, rolz_r3=4.7, rolz_r4=0.6,
         rolz_cascade=0.5, rolz_to_click=0,
+        // bass body (low resonator excited by rolz/clicks)
+        bass_freq=55, bass_decay=0.25, bass_level=0.4,
+        // bass clicker (low-frequency melodic clicks)
+        bass_click_pitch=80, bass_click_decay=0.08, bass_click_amp=0.4,
         // clicker
-        click_rate=3, click_decay=0.008, click_pitch=800,
+        click_rate=3, click_decay=0.03, click_pitch=200,
         click_ring=0.5, click_amp=0.5, click_free=1,
         t_click=0,
-        // gongs
-        gong1=400, gong2=633, gong3=1048, gong4=1672,
-        gong_decay=1.5, gong_amp=0.3,
+        // gongs (now spanning low to high)
+        gong1=80, gong2=220, gong3=580, gong4=1200,
+        gong_decay=2.0, gong_amp=0.4,
         // audio input
         input_gain=0, input_fold=0, input_to_gong=0, input_mix=0,
+        // warmth filter
+        lpf_freq=6000, lpf_res=0.1,
         // global
         chaos=0.3, drift=0.1;
 
       var fb, q1, q2, q3, q4, q5, quantussy;
+      var sub;
       var r1, r2, r3, r4, r1_trig, r2_trig, r3_trig, r4_trig, rolz_trig;
+      var bass_body, all_trig;
       var int_trig, ext_trig, dust_trig, trig;
       var click_env, click1, click2, clicker;
+      var bass_click_env, bass_click;
       var gong_in, gongs;
       var input_sig, input_folded;
       var sig;
 
       // ---- QUANTUSSY RING ----
-      // 5 oscillators in a feedback ring
-      // each modulates the next's frequency via cross-mod
+      // 5 oscillators in a feedback ring — now starting deeper
+      // osc1 at 36 Hz = deep sub territory
       // VarSaw models the triangle-core bounds oscillator
-      // variable width = the analog wobble of real CL capacitors
 
       fb = LocalIn.ar(1, 0);
 
@@ -88,22 +96,36 @@ Engine_Lagarta : CroneEngine {
         LFNoise1.kr(0.67).range(0.05, 0.95)
       );
 
-      // close the ring: osc5 feeds back to osc1
       LocalOut.ar([q5]);
 
-      // mix and fold
-      // Fold.ar simulates signal bouncing off bounds
-      // as bounds narrow, signal folds more = more harmonics + lower amplitude
-      // this IS the CL bounds behavior
       quantussy = Mix([q1, q2, q3, q4, q5]) * 0.2;
       quantussy = Fold.ar(quantussy * (1 + (q_fold * 4)), q_bounds.neg, q_bounds);
       quantussy = quantussy * q_mix;
 
+      // ---- SUB BASS ----
+      // dedicated sub oscillator — Lua updates sub_freq with scale notes
+      // not a static drone: responds to triggers with pitch envelope
+      // sine + pulse hybrid for thickness
+
+      sub = SinOsc.ar(
+        sub_freq + (LFNoise2.kr(0.07) * drift * 2)
+          + (EnvGen.kr(Env.perc(0.001, 0.1), trig) * sub_freq * 0.05), // pitch kick on triggers
+        0,
+        sub_level * 0.6
+      );
+      // pulse sub at same freq for harmonic grit
+      sub = sub + (
+        Pulse.ar(
+          sub_freq + (LFNoise2.kr(0.05) * drift),
+          sub_width + (LFNoise1.kr(0.2) * 0.1)
+        ) * sub_level * 0.25
+      );
+      // slight amplitude pulse from triggers — sub breathes with the rhythm
+      sub = sub * (1 + (EnvGen.kr(Env.perc(0.001, 0.3), trig) * 0.3));
+      sub = LPF.ar(sub, (sub_freq * 4).min(400));
+
       // ---- ROLZ ----
       // Plumbutter-style cascading rhythm oscillators
-      // 4 sub-audio LFOs with comparators
-      // each comparator output modulates the next oscillator's rate
-      // creates emergent polyrhythmic patterns — no two bars the same
 
       r1 = LFSaw.ar(rolz_r1 + (LFNoise2.kr(0.07) * drift * rolz_r1 * 0.1));
       r1_trig = Trig1.ar(r1 - 0, SampleDur.ir * 2);
@@ -120,14 +142,29 @@ Engine_Lagarta : CroneEngine {
         + (LFNoise2.kr(0.13) * drift * rolz_r4 * 0.1));
       r4_trig = Trig1.ar(r4 - 0, SampleDur.ir * 2);
 
-      // sum rolz triggers and route to clicker
       rolz_trig = (r1_trig + r2_trig + r3_trig + r4_trig) * rolz_to_click;
 
+      // ---- BASS BODY ----
+      // low resonant body excited by rolz triggers and clicker
+      // like a kick drum membrane — short decay, deep frequency
+      // Plumbutter's bass drum lives here
+
+      all_trig = rolz_trig + Trig1.ar(K2A.ar(t_click), SampleDur.ir);
+      bass_body = Ringz.ar(
+        EnvGen.ar(Env.perc(0.0001, 0.01), all_trig + Dust.ar(chaos * 2)),
+        bass_freq + (LFNoise2.kr(0.1) * drift * 5),
+        bass_decay
+      );
+      bass_body = (bass_body * bass_level).tanh;
+      // extra sub punch: short sine burst
+      bass_body = bass_body + (
+        SinOsc.ar(bass_freq * 0.5) *
+        EnvGen.ar(Env.perc(0.001, bass_decay * 0.5), all_trig) *
+        bass_level * 0.5
+      );
+
       // ---- CLICKER ----
-      // "an orchestra in a microsecond"
-      // dual impulse voices: very short AD envelopes
-      // ring modulation between voices creates sum/difference tones
-      // golden ratio frequency relationship between voices
+      // now with lower default pitch for meatier clicks
 
       int_trig = Impulse.ar(
         click_rate + (Crackle.ar(1.5 + (chaos * 0.5)) * chaos * click_rate * 0.4)
@@ -136,53 +173,64 @@ Engine_Lagarta : CroneEngine {
       dust_trig = Dust.ar(chaos * 8);
       trig = int_trig + ext_trig + dust_trig + rolz_trig;
 
-      click_env = EnvGen.ar(Env.perc(0.00005, click_decay), trig);
+      click_env = EnvGen.ar(Env.perc(0.0001, click_decay), trig);
 
-      // voice 1: base pitch, modulated by quantussy chaos
       click1 = click_env * SinOsc.ar(
         (click_pitch + (quantussy * 200 * chaos)).max(20)
       );
-      // voice 2: golden ratio above, different chaos modulation
       click2 = click_env * SinOsc.ar(
         (click_pitch * 1.618 + (quantussy * 300 * chaos)).max(20)
       );
 
-      // ring mod blend: 0 = voice 1 only, 1 = full ring mod
       clicker = ((click1 * click2 * click_ring) + (click1 * (1 - click_ring))) * click_amp * 3;
 
+      // ---- BASS CLICKER ----
+      // melodic low-frequency click voice — fires on same triggers
+      // longer decay than main clicker = more tonal, less percussive
+      // pitch tracks bass_click_pitch (Lua updates this with scale notes)
+      bass_click_env = EnvGen.ar(Env.perc(0.001, bass_click_decay), trig);
+      bass_click = bass_click_env * SinOsc.ar(
+        (bass_click_pitch + (quantussy * 30 * chaos)).max(20)
+      );
+      // add a sub-harmonic for weight
+      bass_click = bass_click + (bass_click_env * SinOsc.ar(
+        (bass_click_pitch * 0.5).max(15)
+      ) * 0.6);
+      bass_click = bass_click * bass_click_amp;
+
       // ---- GONGS ----
-      // resonant bodies excited by clicker impulses
-      // like Plumbutter's gong translators
-      // inharmonic frequency ratios create bell/gamelan character
-      // each gong decays at a different rate for spectral evolution
+      // now spanning LOW to high: 80 Hz gong rumbles, 1200 Hz shimmers
+      // the lowest gong provides sustained bass resonance
 
       gong_in = clicker + (dust_trig * 0.2);
 
       // ---- AUDIO INPUT ----
-      // external audio through wavefolder and into gong excitation
-      // plug in guitar, contact mic, field recording — it all becomes CL material
-
       input_sig = SoundIn.ar([0, 1]).sum * input_gain;
       input_folded = Fold.ar(input_sig * (1 + (input_fold * 4)), -0.5, 0.5);
       gong_in = gong_in + (input_folded * input_to_gong);
 
       gongs = Mix([
-        Ringz.ar(gong_in, gong1 + (LFNoise2.kr(0.1) * drift * 20), gong_decay),
-        Ringz.ar(gong_in, gong2 + (LFNoise2.kr(0.13) * drift * 30), gong_decay * 0.75),
-        Ringz.ar(gong_in, gong3 + (LFNoise2.kr(0.17) * drift * 40), gong_decay * 0.5),
-        Ringz.ar(gong_in, gong4 + (LFNoise2.kr(0.19) * drift * 50), gong_decay * 0.3)
+        Ringz.ar(gong_in, gong1 + (LFNoise2.kr(0.1) * drift * 5), gong_decay * 1.5),   // LOW gong — long decay
+        Ringz.ar(gong_in, gong2 + (LFNoise2.kr(0.13) * drift * 15), gong_decay),
+        Ringz.ar(gong_in, gong3 + (LFNoise2.kr(0.17) * drift * 30), gong_decay * 0.6),
+        Ringz.ar(gong_in, gong4 + (LFNoise2.kr(0.19) * drift * 40), gong_decay * 0.35)
       ]) * 0.12 * gong_amp;
 
       // ---- MIX + OUTPUT ----
-      sig = quantussy + clicker + gongs + (input_folded * input_mix);
+      sig = quantussy + sub + bass_body + bass_click + clicker + gongs + (input_folded * input_mix);
       sig = LeakDC.ar(sig);
-      sig = sig.tanh; // soft saturation
+
+      // warmth filter — tames harsh highs, fattens the body
+      sig = RLPF.ar(sig, lpf_freq, lpf_res.max(0.01));
+
+      sig = sig.tanh; // soft saturation (adds warmth + harmonics)
       sig = sig * amp;
 
-      // gentle stereo drift
-      Out.ar(out, Pan2.ar(sig,
-        LFNoise2.kr(0.1 + (chaos * 0.5)).range(-0.3, 0.3)
-      ));
+      // gentle stereo drift (sub stays centered)
+      Out.ar(out, [
+        sig + Pan2.ar(sub * 0.3, 0).at(0),
+        sig + Pan2.ar(sub * 0.3, 0).at(1)
+      ] * Pan2.ar(1, LFNoise2.kr(0.1 + (chaos * 0.5)).range(-0.25, 0.25)));
     }).add;
 
     context.server.sync;
@@ -202,6 +250,11 @@ Engine_Lagarta : CroneEngine {
     this.addCommand("q_mix", "f", { arg msg; synth.set(\q_mix, msg[1]); });
     this.addCommand("q_fold", "f", { arg msg; synth.set(\q_fold, msg[1]); });
 
+    // sub
+    this.addCommand("sub_freq", "f", { arg msg; synth.set(\sub_freq, msg[1]); });
+    this.addCommand("sub_level", "f", { arg msg; synth.set(\sub_level, msg[1]); });
+    this.addCommand("sub_width", "f", { arg msg; synth.set(\sub_width, msg[1]); });
+
     // rolz
     this.addCommand("rolz_r1", "f", { arg msg; synth.set(\rolz_r1, msg[1]); });
     this.addCommand("rolz_r2", "f", { arg msg; synth.set(\rolz_r2, msg[1]); });
@@ -209,6 +262,16 @@ Engine_Lagarta : CroneEngine {
     this.addCommand("rolz_r4", "f", { arg msg; synth.set(\rolz_r4, msg[1]); });
     this.addCommand("rolz_cascade", "f", { arg msg; synth.set(\rolz_cascade, msg[1]); });
     this.addCommand("rolz_to_click", "f", { arg msg; synth.set(\rolz_to_click, msg[1]); });
+
+    // bass body
+    this.addCommand("bass_freq", "f", { arg msg; synth.set(\bass_freq, msg[1]); });
+    this.addCommand("bass_decay", "f", { arg msg; synth.set(\bass_decay, msg[1]); });
+    this.addCommand("bass_level", "f", { arg msg; synth.set(\bass_level, msg[1]); });
+
+    // bass clicker
+    this.addCommand("bass_click_pitch", "f", { arg msg; synth.set(\bass_click_pitch, msg[1]); });
+    this.addCommand("bass_click_decay", "f", { arg msg; synth.set(\bass_click_decay, msg[1]); });
+    this.addCommand("bass_click_amp", "f", { arg msg; synth.set(\bass_click_amp, msg[1]); });
 
     // clicker
     this.addCommand("click_rate", "f", { arg msg; synth.set(\click_rate, msg[1]); });
@@ -232,6 +295,10 @@ Engine_Lagarta : CroneEngine {
     this.addCommand("input_fold", "f", { arg msg; synth.set(\input_fold, msg[1]); });
     this.addCommand("input_to_gong", "f", { arg msg; synth.set(\input_to_gong, msg[1]); });
     this.addCommand("input_mix", "f", { arg msg; synth.set(\input_mix, msg[1]); });
+
+    // warmth
+    this.addCommand("lpf_freq", "f", { arg msg; synth.set(\lpf_freq, msg[1]); });
+    this.addCommand("lpf_res", "f", { arg msg; synth.set(\lpf_res, msg[1]); });
 
     // global
     this.addCommand("chaos", "f", { arg msg; synth.set(\chaos, msg[1]); });
