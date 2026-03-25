@@ -1324,33 +1324,87 @@ end
 -- input
 ------------------------------------------------------------
 
+function do_click()
+  if params:get("music_mode") == 2 then
+    local note = get_music_note()
+    local freq = musicutil.note_num_to_freq(note)
+    engine.click_pitch(freq)
+    engine.bass_click_pitch(musicutil.note_num_to_freq(math.max(note - 12, 20)))
+    engine.sub_freq(musicutil.note_num_to_freq(math.max(note - 24, 15)))
+  end
+  engine.trig(1)
+  click_flash = 1
+  for i = 1, 4 do
+    gong_rings[i] = math.max(gong_rings[i], 0.6 + math.random() * 0.4)
+  end
+  send_midi_click()
+end
+
 function enc(n, d)
   if n == 1 then
-    page = util.clamp(page + d, 1, 6)
-  elseif page == 1 then
-    if n == 2 then params:delta("q_cross", d)
-    elseif n == 3 then params:delta("q_fold", d) end
-    record_gesture(n == 2 and "q_cross" or "q_fold", params:get(n == 2 and "q_cross" or "q_fold"))
-  elseif page == 2 then
-    if n == 2 then params:delta("click_pitch", d)
-    elseif n == 3 then params:delta("click_ring", d) end
-    record_gesture(n == 2 and "click_pitch" or "click_ring",
-      params:get(n == 2 and "click_pitch" or "click_ring"))
-  elseif page == 3 then
-    if n == 2 then params:delta("gong_decay", d)
-    elseif n == 3 then params:delta("gong_amp", d) end
-  elseif page == 4 then
-    if n == 2 then params:delta("rolz_cascade", d)
-    elseif n == 3 then params:delta("rolz_to_click", d) end
-  elseif page == 5 then
-    if n == 2 then params:delta("tape_rate", d)
-    elseif n == 3 then params:delta("tape_slide", d) end
-  elseif page == 6 then
+    -- E1: page select normally. Hold K3 + E1 = chaos
+    if k3_held then
+      params:delta("chaos", d)
+    else
+      page = util.clamp(page + d, 1, 6)
+    end
+
+  elseif page == 1 then -- QUANTUSSY
+    -- K3 held = alt layer
+    if k3_held then
+      if n == 2 then params:delta("q_bounds", d)
+      elseif n == 3 then params:delta("q_mix", d) end
+    else
+      if n == 2 then params:delta("q_cross", d)
+      elseif n == 3 then params:delta("q_fold", d) end
+    end
+    local pid = k3_held and (n == 2 and "q_bounds" or "q_mix") or (n == 2 and "q_cross" or "q_fold")
+    record_gesture(pid, params:get(pid))
+
+  elseif page == 2 then -- CLICKER
+    if k3_held then
+      if n == 2 then params:delta("click_rate", d)
+      elseif n == 3 then params:delta("click_decay", d) end
+    else
+      if n == 2 then params:delta("click_pitch", d)
+      elseif n == 3 then params:delta("click_ring", d) end
+    end
+    local pid = k3_held and (n == 2 and "click_rate" or "click_decay") or (n == 2 and "click_pitch" or "click_ring")
+    record_gesture(pid, params:get(pid))
+
+  elseif page == 3 then -- GONGS
+    if k3_held then
+      -- shift: tune individual gongs
+      if n == 2 then params:delta("gong1", d)
+      elseif n == 3 then params:delta("gong2", d) end
+    else
+      if n == 2 then params:delta("gong_decay", d)
+      elseif n == 3 then params:delta("gong_amp", d) end
+    end
+
+  elseif page == 4 then -- ROLZ
+    if k3_held then
+      -- shift: individual rolz rates
+      if n == 2 then params:delta("rolz_r1", d)
+      elseif n == 3 then params:delta("rolz_r2", d) end
+    else
+      if n == 2 then params:delta("rolz_cascade", d)
+      elseif n == 3 then params:delta("rolz_to_click", d) end
+    end
+
+  elseif page == 5 then -- TAPE
+    if k3_held then
+      if n == 2 then params:delta("tape_feedback", d)
+      elseif n == 3 then params:delta("tape_gene", d) end
+    else
+      if n == 2 then params:delta("tape_rate", d)
+      elseif n == 3 then params:delta("tape_slide", d) end
+    end
+
+  elseif page == 6 then -- LAGARTA
     if n == 2 then
-      -- cycle selected caterpillar
       cat_selected = util.clamp(cat_selected + d, 1, #SPECIES_ORDER)
     elseif n == 3 then
-      -- adjust aggression
       params:delta("cat_aggression", d)
     end
   end
@@ -1358,8 +1412,39 @@ end
 
 function key(n, z)
   if n == 2 and z == 1 then
-    if page == 5 then
-      -- tape controls
+    if page == 1 then
+      -- randomize quantussy to musical intervals
+      local root = params:get("q_freq1")
+      for i = 2, 5 do
+        local ratio = CONSONANT[math.random(1, #CONSONANT)]
+        local oct = ({0.5, 1, 1, 2})[math.random(1, 4)]
+        pcall(function()
+          params:set("q_freq" .. i, util.clamp(root * ratio * oct, 20, 2000))
+        end)
+      end
+      do_click()
+
+    elseif page == 2 then
+      -- click trigger
+      do_click()
+
+    elseif page == 3 then
+      -- strike all gongs hard
+      do_click()
+      for i = 1, 4 do gong_rings[i] = 1 end
+
+    elseif page == 4 then
+      -- randomize rolz rates to polyrhythmic ratios
+      local base = params:get("rolz_r1")
+      for i = 2, 4 do
+        local ratio = POLY_RATIOS[math.random(1, #POLY_RATIOS)]
+        pcall(function()
+          params:set("rolz_r" .. i, util.clamp(base * ratio, 0.01, 20))
+        end)
+      end
+      do_click()
+
+    elseif page == 5 then
       if tape_recording then
         tape_stop_recording()
       elseif tape_playing then
@@ -1367,28 +1452,14 @@ function key(n, z)
       else
         tape_start_recording()
       end
+
     elseif page == 6 then
-      -- toggle selected caterpillar on/off
       local sp_key = SPECIES_ORDER[cat_selected]
       local param_name = "cat_" .. sp_key
       local current = params:get(param_name)
       params:set(param_name, current == 1 and 2 or 1)
-    else
-      -- manual click
-      if params:get("music_mode") == 2 then
-        local note = get_music_note()
-        local freq = musicutil.note_num_to_freq(note)
-        engine.click_pitch(freq)
-        engine.bass_click_pitch(musicutil.note_num_to_freq(math.max(note - 12, 20)))
-        engine.sub_freq(musicutil.note_num_to_freq(math.max(note - 24, 15)))
-      end
-      engine.trig(1)
-      click_flash = 1
-      for i = 1, 4 do
-        gong_rings[i] = math.max(gong_rings[i], 0.6 + math.random() * 0.4)
-      end
-      send_midi_click()
     end
+
   elseif n == 3 then
     if z == 1 then
       k3_held = true
@@ -1396,10 +1467,8 @@ function key(n, z)
     else
       k3_held = false
       if util.time() - k3_time > 0.5 then
-        -- long press: cycle grid mode
         params:set("grid_mode", (grid_mode % 3) + 1)
       else
-        -- short press: chaos burst
         do_chaos_burst()
       end
     end
