@@ -1672,8 +1672,12 @@ function draw_gongs()
     screen.move(66, 14 + (i-1) * 11)
     screen.text(i .. ":" .. string.format("%.0f", params:get("gong" .. i)))
   end
-  screen.level(8); screen.move(66, 56); screen.text("decay")
-  screen.level(15); screen.move(98, 56); screen.text(string.format("%.1f", params:get("gong_decay")))
+  screen.level(8); screen.move(66, 50); screen.text("decay")
+  screen.level(15); screen.move(98, 50); screen.text(string.format("%.1f", params:get("gong_decay")))
+  -- amp bar
+  screen.level(8); screen.move(66, 59); screen.text("amp")
+  screen.level(3); screen.rect(86, 55, 38, 3); screen.stroke()
+  screen.level(12); screen.rect(86, 55, math.floor(params:get("gong_amp") * 38), 3); screen.fill()
 end
 
 ------------------------------------------------------------
