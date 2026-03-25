@@ -900,7 +900,8 @@ function lagarta_think(species_key)
       end
       set_safe("click_decay", rr(sp.click_decay_range[1], sp.click_decay_range[2]))
       set_safe("click_ring", rr(0.2, 0.6))
-      if math.random() < 0.3 then set_safe("click_rate", rr(1, 8)) end
+      -- verde: rate varies between slow melodic and faster rhythmic
+      set_safe("click_rate", rr(0.5, 12))
       set_safe("click_amp", rr(0.4, 0.8))
       -- bass: warm and present
       set_safe("bass_level", rr(0.15, 0.4))
@@ -939,7 +940,8 @@ function lagarta_think(species_key)
       set_safe("click_pitch", rr(50, 3000))
       set_safe("click_decay", rr(sp.click_decay_range[1], sp.click_decay_range[2]))
       set_safe("click_ring", rr(0.5, 1.0))
-      set_safe("click_rate", rr(0.5, 25 * agg))
+      -- venenosa: wildly erratic rate, from near-silence to machine gun
+      set_safe("click_rate", ({rr(0.1, 0.5), rr(2, 8), rr(15, 40)})[math.random(1, 3)])
       set_safe("click_amp", rr(0.5, 0.9))
       -- bass: harsh pitch shifts
       set_safe("bass_click_pitch", rr(20, 400))
@@ -996,6 +998,8 @@ function lagarta_think(species_key)
       set_safe("click_ring", rr(0.1, 0.4))
       if math.random() < 0.2 then set_safe("click_rate", rr(0.2, 2)) end
       set_safe("click_amp", rr(0.1, 0.4))
+      -- seda: very slow clicks, sometimes stopping entirely
+      set_safe("click_rate", rr(0.1, 1.5))
       if #scale_notes > 0 then
         local note = scale_notes[math.random(1, math.min(3, #scale_notes))]
         set_safe("click_pitch", musicutil.note_num_to_freq(note))
@@ -1047,9 +1051,9 @@ function lagarta_think(species_key)
       set_safe("q_cross", rr(0.2, 0.6))
       set_safe("q_bounds", rr(0.3, 0.7))
       set_safe("q_mix", rr(0.15, 0.4))
-      -- clicker: polyrhythmic rates, short punchy
-      local base_rate = rr(2, 8)
-      set_safe("click_rate", base_rate * POLY_RATIOS[math.random(1, #POLY_RATIOS)])
+      -- fogo: polyrhythmic rates, wide range from halftime to double
+      local base_rate = rr(1, 15)
+      set_safe("click_rate", util.clamp(base_rate * POLY_RATIOS[math.random(1, #POLY_RATIOS)], 0.3, 35))
       set_safe("click_decay", rr(sp.click_decay_range[1], sp.click_decay_range[2]))
       set_safe("click_ring", rr(0.2, 0.7))
       set_safe("click_amp", rr(0.5, 0.9))
@@ -1066,13 +1070,13 @@ function lagarta_think(species_key)
         set_safe("bass_freq", util.clamp(musicutil.note_num_to_freq(math.max(note - 12, 20)), 20, 200))
       end
       set_safe("sub_level", rr(0.15, sp.sub_love + 0.2))
-      -- rolz: polyrhythmic cascade
-      set_safe("rolz_r1", rr(0.5, 6))
+      -- rolz: wild polyrhythmic cascade across full range
+      set_safe("rolz_r1", rr(0.3, 12))
       for i = 2, 4 do
-        set_safe("rolz_r" .. i, util.clamp(params:get("rolz_r1") * POLY_RATIOS[math.random(1, #POLY_RATIOS)], 0.01, 20))
+        set_safe("rolz_r" .. i, util.clamp(params:get("rolz_r1") * POLY_RATIOS[math.random(1, #POLY_RATIOS)], 0.05, 20))
       end
-      set_safe("rolz_to_click", rr(0.2, 0.7))
-      set_safe("rolz_cascade", rr(0.3, 0.8))
+      set_safe("rolz_to_click", rr(0.3, 0.9))
+      set_safe("rolz_cascade", rr(0.4, 1.0))
       -- gongs: percussive tuning
       for i = 1, 4 do
         if math.random() < 0.35 * agg then

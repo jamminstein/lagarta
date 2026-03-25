@@ -135,19 +135,24 @@ Engine_Lagarta : CroneEngine {
       // ---- ROLZ ----
       // Plumbutter-style cascading rhythm oscillators
 
-      r1 = LFSaw.ar(rolz_r1 + (LFNoise2.kr(0.07) * drift * rolz_r1 * 0.1));
+      // rolz rates drift organically via LFNoise — never metronomic
+      r1 = LFSaw.ar(rolz_r1 * (1 + LFNoise1.kr(0.15).range(-0.3, 0.4))
+        + (LFNoise2.kr(0.07) * drift * rolz_r1 * 0.2));
       r1_trig = Trig1.ar(r1 - 0, SampleDur.ir * 2);
 
-      r2 = LFSaw.ar(rolz_r2 + (r1_trig * rolz_cascade * rolz_r2 * 0.5)
-        + (LFNoise2.kr(0.09) * drift * rolz_r2 * 0.1));
+      r2 = LFSaw.ar(rolz_r2 * (1 + LFNoise1.kr(0.12).range(-0.3, 0.4))
+        + (r1_trig * rolz_cascade * rolz_r2 * 0.5)
+        + (LFNoise2.kr(0.09) * drift * rolz_r2 * 0.2));
       r2_trig = Trig1.ar(r2 - 0, SampleDur.ir * 2);
 
-      r3 = LFSaw.ar(rolz_r3 + (r2_trig * rolz_cascade * rolz_r3 * 0.5)
-        + (LFNoise2.kr(0.11) * drift * rolz_r3 * 0.1));
+      r3 = LFSaw.ar(rolz_r3 * (1 + LFNoise1.kr(0.09).range(-0.3, 0.4))
+        + (r2_trig * rolz_cascade * rolz_r3 * 0.5)
+        + (LFNoise2.kr(0.11) * drift * rolz_r3 * 0.2));
       r3_trig = Trig1.ar(r3 - 0, SampleDur.ir * 2);
 
-      r4 = LFSaw.ar(rolz_r4 + (r3_trig * rolz_cascade * rolz_r4 * 0.5)
-        + (LFNoise2.kr(0.13) * drift * rolz_r4 * 0.1));
+      r4 = LFSaw.ar(rolz_r4 * (1 + LFNoise1.kr(0.07).range(-0.3, 0.4))
+        + (r3_trig * rolz_cascade * rolz_r4 * 0.5)
+        + (LFNoise2.kr(0.13) * drift * rolz_r4 * 0.2));
       r4_trig = Trig1.ar(r4 - 0, SampleDur.ir * 2);
 
       rolz_trig = (r1_trig + r2_trig + r3_trig + r4_trig) * rolz_to_click;
@@ -172,13 +177,35 @@ Engine_Lagarta : CroneEngine {
       );
 
       // ---- CLICKER ----
-      // now with lower default pitch for meatier clicks
+      // rhythmically alive trigger system:
+      // base impulse + LFO-modulated rate + chaos dust + rolz polyrhythm
+      // the rate itself wobbles via LFNoise, creating accelerando/ritardando
+      // a second slower pulse creates accent patterns
 
       int_trig = Impulse.ar(
-        click_rate + (Crackle.ar(1.5 + (chaos * 0.5)) * chaos * click_rate * 0.4)
+        // rate wobbles: LFNoise1 creates organic speeding up / slowing down
+        (click_rate * (1 + (LFNoise1.kr(
+          0.2 + (chaos * 0.8) // wobble speed depends on chaos
+        ).range(-0.5, 0.7) * (0.3 + chaos * 0.7)))) // wobble depth depends on chaos
+        + (Crackle.ar(1.5 + (chaos * 0.5)) * chaos * click_rate * 0.3)
       ) * click_free;
+
+      // accent pulse: slower subdivision creates emphasis pattern
+      int_trig = int_trig + (Impulse.ar(
+        click_rate * LFNoise0.kr(0.15 + chaos * 0.3).range(0.25, 0.5) // accent at random subdivisions
+      ) * click_free * 0.5);
+
+      // stochastic triggers: dust for unpredictable hits
       ext_trig = Trig1.ar(K2A.ar(t_click), SampleDur.ir);
-      dust_trig = Dust.ar(chaos * 8);
+      dust_trig = Dust.ar(
+        (chaos * 12) + (LFNoise2.kr(0.3).range(0, 4)) // dust density varies over time
+      );
+
+      // burst trigger: occasional rapid-fire cluster
+      dust_trig = dust_trig + (Dust2.ar(chaos * 3) * Impulse.ar(
+        LFNoise0.kr(0.1).range(8, 30) // burst speed
+      ) * (LFNoise0.kr(0.07) > 0.5).asInteger); // burst gate: 50% of time
+
       trig = int_trig + ext_trig + dust_trig + rolz_trig;
 
       click_env = EnvGen.ar(Env.perc(0.0001, click_decay), trig);
