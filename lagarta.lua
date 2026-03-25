@@ -173,6 +173,7 @@ local LIFECYCLE = {
 local lagartas = {}
 local active_species = {}
 local cat_selected = 1
+local mix_selected = 1 -- selected mixer voice (1-6)
 
 -- grid
 local g = nil
@@ -1646,12 +1647,13 @@ function enc(n, d)
     end
 
   elseif page == 7 then -- MASTER
+    local mix_params = {"mix_quantussy","mix_sub","mix_bass_body","mix_bass_click","mix_clicker","mix_gongs"}
     if n == 2 then
       if k3_held then params:delta("eq_lo_gain", d)    -- K3+E2: low EQ
-      else params:delta("amp", d) end
+      else params:delta(mix_params[mix_selected], d) end -- E2: selected voice level
     elseif n == 3 then
       if k3_held then params:delta("eq_hi_gain", d)    -- K3+E3: high EQ
-      else params:delta("saturation", d) end
+      else params:delta("amp", d) end                   -- E3: master volume
     end
   end
 end
@@ -1704,6 +1706,9 @@ function key(n, z)
       local param_name = "cat_" .. sp_key
       local current = params:get(param_name)
       params:set(param_name, current == 1 and 2 or 1)
+    elseif page == 7 then
+      -- cycle mixer voice selection
+      mix_selected = (mix_selected % 6) + 1
     end
 
   elseif n == 3 then
@@ -2565,19 +2570,29 @@ function draw_master()
     pcall(function() val = params:get(voice_params[i]) end)
     local fill_h = math.floor((val / 2) * bar_h)
 
+    local sel = (i == mix_selected)
     -- bar outline
-    screen.level(3)
+    screen.level(sel and 12 or 3)
     screen.rect(x, bar_y, bar_w, bar_h)
     screen.stroke()
     -- bar fill
-    screen.level(val > 0.01 and 10 or 1)
+    screen.level(sel and 15 or (val > 0.01 and 8 or 1))
     screen.rect(x, bar_y + bar_h - fill_h, bar_w, fill_h)
     screen.fill()
     -- label
-    screen.level(6)
+    screen.level(sel and 15 or 5)
     screen.font_size(5)
     screen.move(x, bar_y + bar_h + 6)
     screen.text(voices[i])
+    -- selection arrow
+    if sel then
+      screen.level(15)
+      screen.move(x + bar_w/2, bar_y - 3)
+      screen.line(x + bar_w/2 - 2, bar_y - 1)
+      screen.line(x + bar_w/2 + 2, bar_y - 1)
+      screen.close()
+      screen.fill()
+    end
   end
 
   -- EQ section (right side)
