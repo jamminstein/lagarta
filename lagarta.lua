@@ -1162,11 +1162,51 @@ end
 
 function do_chaos_burst()
   chaos_burst = 1
-  local prev = params:get("chaos")
-  params:set("chaos", math.min(prev + 0.4, 1))
+
+  -- spike chaos engine param
+  local prev_chaos = params:get("chaos")
+  params:set("chaos", math.min(prev_chaos + 0.4, 1))
+
+  -- randomize quantussy freqs (musical: multiply by nearby intervals)
+  for i = 1, 5 do
+    local cur = params:get("q_freq" .. i)
+    local factor = 0.85 + math.random() * 0.3
+    pcall(function() params:set("q_freq" .. i, util.clamp(cur * factor, 20, 2000)) end)
+  end
+
+  -- jolt fold and cross
+  local prev_fold = params:get("q_fold")
+  local prev_cross = params:get("q_cross")
+  params:set("q_fold", util.clamp(prev_fold + (math.random() - 0.3) * 0.3, 0, 1))
+  params:set("q_cross", util.clamp(prev_cross + (math.random() - 0.3) * 0.2, 0, 1))
+
+  -- randomize a gong freq
+  local gi = math.random(1, 4)
+  local gong_cur = params:get("gong" .. gi)
+  pcall(function() params:set("gong" .. gi, util.clamp(gong_cur * (0.7 + math.random() * 0.6), 50, 5000)) end)
+
+  -- spike click rate briefly
+  local prev_rate = params:get("click_rate")
+  params:set("click_rate", util.clamp(prev_rate * (1 + math.random() * 2), 0.1, 40))
+
+  -- spike rolz
+  local prev_rolz = params:get("rolz_to_click")
+  params:set("rolz_to_click", util.clamp(prev_rolz + 0.3, 0, 1))
+
+  -- trigger a click for immediate impact
+  do_click()
+
+  -- visual flash on all gongs
+  for i = 1, 4 do gong_rings[i] = 1 end
+
+  -- recover after burst
   clock.run(function()
-    clock.sleep(0.6)
-    params:set("chaos", prev)
+    clock.sleep(0.8)
+    params:set("chaos", prev_chaos)
+    params:set("q_fold", prev_fold)
+    params:set("q_cross", prev_cross)
+    params:set("click_rate", prev_rate)
+    params:set("rolz_to_click", prev_rolz)
   end)
 end
 
