@@ -1332,10 +1332,10 @@ function enc(n, d)
     elseif n == 3 then params:delta("q_fold", d) end
     record_gesture(n == 2 and "q_cross" or "q_fold", params:get(n == 2 and "q_cross" or "q_fold"))
   elseif page == 2 then
-    if n == 2 then params:delta("click_rate", d)
-    elseif n == 3 then params:delta("click_decay", d) end
-    record_gesture(n == 2 and "click_rate" or "click_decay",
-      params:get(n == 2 and "click_rate" or "click_decay"))
+    if n == 2 then params:delta("click_pitch", d)
+    elseif n == 3 then params:delta("click_ring", d) end
+    record_gesture(n == 2 and "click_pitch" or "click_ring",
+      params:get(n == 2 and "click_pitch" or "click_ring"))
   elseif page == 3 then
     if n == 2 then params:delta("gong_decay", d)
     elseif n == 3 then params:delta("gong_amp", d) end
@@ -1565,10 +1565,10 @@ function draw_clicker()
 
   screen.font_size(8)
   local info = {
-    {l="rate",  v=string.format("%.1f", params:get("click_rate")),  y=18},
-    {l="decay", v=string.format("%.3f", decay),                     y=28},
-    {l="ring",  v=string.format("%.2f", ring),                      y=38},
-    {l="pitch", v=string.format("%.0f", pitch),                     y=48},
+    {l="pitch", v=string.format("%.0f", pitch),                     y=18},
+    {l="ring",  v=string.format("%.2f", ring),                      y=28},
+    {l="rate",  v=string.format("%.1f", params:get("click_rate")),  y=38},
+    {l="decay", v=string.format("%.3f", decay),                     y=48},
   }
   for _, p in ipairs(info) do
     screen.level(8); screen.move(66, p.y); screen.text(p.l)
