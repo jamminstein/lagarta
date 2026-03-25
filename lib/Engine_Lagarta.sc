@@ -42,8 +42,16 @@ Engine_Lagarta : CroneEngine {
         gong_decay=2.0, gong_amp=0.5,
         // audio input
         input_gain=0, input_fold=0, input_to_gong=0, input_mix=0,
-        // warmth filter
+        // mixer levels (per voice, 0=mute to 2=boost)
+        mix_quantussy=0.25, mix_sub=0.15, mix_bass_body=0.2,
+        mix_bass_click=0.4, mix_clicker=0.7, mix_gongs=0.5,
+        // 3-band EQ
+        eq_lo_freq=120, eq_lo_gain=0, eq_lo_rs=1,
+        eq_mid_freq=1000, eq_mid_gain=0, eq_mid_rq=0.7,
+        eq_hi_freq=5000, eq_hi_gain=0, eq_hi_rs=1,
+        // master
         lpf_freq=3500, lpf_res=0.1,
+        saturation=0.5, stereo_width=0.25,
         // global
         chaos=0.3, drift=0.1;
 
@@ -216,19 +224,35 @@ Engine_Lagarta : CroneEngine {
         Ringz.ar(gong_in, gong4 + (LFNoise2.kr(0.19) * drift * 40), gong_decay * 0.35)
       ]) * 0.12 * gong_amp;
 
-      // ---- MIX + OUTPUT ----
-      sig = quantussy + sub + bass_body + bass_click + clicker + gongs + (input_folded * input_mix);
+      // ---- MIXER ----
+      // per-voice levels: 0=mute, 1=unity, 2=boost
+      sig = (quantussy * mix_quantussy)
+        + (bass_body * mix_bass_body)
+        + (bass_click * mix_bass_click)
+        + (clicker * mix_clicker)
+        + (gongs * mix_gongs)
+        + (input_folded * input_mix);
       sig = LeakDC.ar(sig);
 
-      // warmth filter — tames harsh highs, fattens the body
+      // ---- 3-BAND EQ ----
+      // low shelf, parametric mid, high shelf
+      sig = BLowShelf.ar(sig, eq_lo_freq, eq_lo_rs.max(0.1), eq_lo_gain.dbamp);
+      sig = BPeakEQ.ar(sig, eq_mid_freq, eq_mid_rq.max(0.1), eq_mid_gain);
+      sig = BHiShelf.ar(sig, eq_hi_freq, eq_hi_rs.max(0.1), eq_hi_gain.dbamp);
+
+      // warmth filter
       sig = RLPF.ar(sig, lpf_freq, lpf_res.max(0.01));
 
-      sig = sig.tanh; // soft saturation (adds warmth + harmonics)
+      // ---- MASTER ----
+      // saturation: 0=clean, 1=warm, >1=heavy
+      sig = Select.ar(saturation > 0.01, [sig, (sig * (1 + saturation)).tanh]);
+
       sig = sig * amp;
 
-      // stereo: sub centered, rest gently panned
-      sig = Pan2.ar(sig, LFNoise2.kr(0.1 + (chaos * 0.5)).range(-0.25, 0.25));
-      sig = sig + (sub ! 2); // sub stays mono/centered
+      // stereo image: sub centered, rest panned with width control
+      sig = Pan2.ar(sig, LFNoise2.kr(0.1 + (chaos * 0.5)).range(stereo_width.neg, stereo_width));
+      // sub always mono center
+      sig = sig + ((sub * mix_sub) ! 2);
       Out.ar(out, sig);
     }).add;
 
@@ -295,9 +319,27 @@ Engine_Lagarta : CroneEngine {
     this.addCommand("input_to_gong", "f", { arg msg; synth.set(\input_to_gong, msg[1]); });
     this.addCommand("input_mix", "f", { arg msg; synth.set(\input_mix, msg[1]); });
 
-    // warmth
+    // mixer
+    this.addCommand("mix_quantussy", "f", { arg msg; synth.set(\mix_quantussy, msg[1]); });
+    this.addCommand("mix_sub", "f", { arg msg; synth.set(\mix_sub, msg[1]); });
+    this.addCommand("mix_bass_body", "f", { arg msg; synth.set(\mix_bass_body, msg[1]); });
+    this.addCommand("mix_bass_click", "f", { arg msg; synth.set(\mix_bass_click, msg[1]); });
+    this.addCommand("mix_clicker", "f", { arg msg; synth.set(\mix_clicker, msg[1]); });
+    this.addCommand("mix_gongs", "f", { arg msg; synth.set(\mix_gongs, msg[1]); });
+
+    // eq
+    this.addCommand("eq_lo_freq", "f", { arg msg; synth.set(\eq_lo_freq, msg[1]); });
+    this.addCommand("eq_lo_gain", "f", { arg msg; synth.set(\eq_lo_gain, msg[1]); });
+    this.addCommand("eq_mid_freq", "f", { arg msg; synth.set(\eq_mid_freq, msg[1]); });
+    this.addCommand("eq_mid_gain", "f", { arg msg; synth.set(\eq_mid_gain, msg[1]); });
+    this.addCommand("eq_hi_freq", "f", { arg msg; synth.set(\eq_hi_freq, msg[1]); });
+    this.addCommand("eq_hi_gain", "f", { arg msg; synth.set(\eq_hi_gain, msg[1]); });
+
+    // master
     this.addCommand("lpf_freq", "f", { arg msg; synth.set(\lpf_freq, msg[1]); });
     this.addCommand("lpf_res", "f", { arg msg; synth.set(\lpf_res, msg[1]); });
+    this.addCommand("saturation", "f", { arg msg; synth.set(\saturation, msg[1]); });
+    this.addCommand("stereo_width", "f", { arg msg; synth.set(\stereo_width, msg[1]); });
 
     // global
     this.addCommand("chaos", "f", { arg msg; synth.set(\chaos, msg[1]); });

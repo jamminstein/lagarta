@@ -32,8 +32,8 @@ local musicutil = require "musicutil"
 -- constants
 ------------------------------------------------------------
 
-local PAGES = {"QUANTSSY", "CLICKER", "GONGS", "ROLZ", "TAPE", "LAGARTA"}
-local PAGE_FULL = {"QUANTUSSY", "CLICKER", "GONGS", "ROLZ", "TAPE", "LAGARTA"}
+local PAGES = {"QNTSSY", "CLICKR", "GONGS", "ROLZ", "TAPE", "LAGRTA", "MASTR"}
+local PAGE_FULL = {"QUANTUSSY", "CLICKER", "GONGS", "ROLZ", "TAPE", "LAGARTA", "MASTER"}
 local DIV_NAMES = {"1", "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16"}
 local DIV_VALUES = {1, 1/2, 1/3, 1/4, 1/6, 1/8, 1/12, 1/16}
 local GRID_MODES = {"PATCHBAY", "KEYBOARD", "GESTURE"}
@@ -197,14 +197,12 @@ function init()
   params:add_separator("header", "LAGARTA")
 
   -- GLOBAL
-  params:add_group("global", "GLOBAL", 4)
+  params:add_group("global", "GLOBAL", 3)
   params:add_control("chaos", "chaos", controlspec.new(0, 1, 'lin', 0, 0.3))
   params:add_control("drift", "drift", controlspec.new(0, 1, 'lin', 0, 0.1))
-  params:add_control("amp", "amplitude", controlspec.new(0, 1, 'lin', 0, 0.5))
   params:add_option("grid_mode", "grid mode", GRID_MODES, 1)
   params:set_action("chaos", function(v) engine.chaos(v) end)
   params:set_action("drift", function(v) engine.drift(v) end)
-  params:set_action("amp", function(v) engine.amp(v) end)
   params:set_action("grid_mode", function(v) grid_mode = v; grid_dirty = true end)
 
   -- QUANTUSSY (lower defaults for more bass weight)
@@ -317,12 +315,46 @@ function init()
   params:set_action("input_to_gong", function(v) engine.input_to_gong(v) end)
   params:set_action("input_mix", function(v) engine.input_mix(v) end)
 
-  -- WARMTH
-  params:add_group("warmth", "WARMTH", 2)
+  -- MIXER (per-voice levels)
+  params:add_group("mixer", "MIXER", 6)
+  local mix_voices = {
+    {"mix_quantussy", "quantussy", 0.25},
+    {"mix_sub", "sub bass", 0.15},
+    {"mix_bass_body", "bass body", 0.2},
+    {"mix_bass_click", "bass click", 0.4},
+    {"mix_clicker", "clicker", 0.7},
+    {"mix_gongs", "gongs", 0.5},
+  }
+  for _, v in ipairs(mix_voices) do
+    params:add_control(v[1], v[2], controlspec.new(0, 2, 'lin', 0, v[3]))
+    params:set_action(v[1], function(val) engine[v[1]](val) end)
+  end
+
+  -- EQ (3-band)
+  params:add_group("eq", "EQ", 6)
+  params:add_control("eq_lo_freq", "low freq", controlspec.new(30, 400, 'exp', 0, 120, "hz"))
+  params:add_control("eq_lo_gain", "low gain", controlspec.new(-12, 12, 'lin', 0, 0, "dB"))
+  params:add_control("eq_mid_freq", "mid freq", controlspec.new(200, 5000, 'exp', 0, 1000, "hz"))
+  params:add_control("eq_mid_gain", "mid gain", controlspec.new(-12, 12, 'lin', 0, 0, "dB"))
+  params:add_control("eq_hi_freq", "high freq", controlspec.new(2000, 12000, 'exp', 0, 5000, "hz"))
+  params:add_control("eq_hi_gain", "high gain", controlspec.new(-12, 12, 'lin', 0, 0, "dB"))
+  params:set_action("eq_lo_freq", function(v) engine.eq_lo_freq(v) end)
+  params:set_action("eq_lo_gain", function(v) engine.eq_lo_gain(v) end)
+  params:set_action("eq_mid_freq", function(v) engine.eq_mid_freq(v) end)
+  params:set_action("eq_mid_gain", function(v) engine.eq_mid_gain(v) end)
+  params:set_action("eq_hi_freq", function(v) engine.eq_hi_freq(v) end)
+  params:set_action("eq_hi_gain", function(v) engine.eq_hi_gain(v) end)
+
+  -- MASTER
+  params:add_group("master", "MASTER", 4)
   params:add_control("lpf_freq", "filter freq", controlspec.new(200, 12000, 'exp', 0, 3500, "hz"))
-  params:add_control("lpf_res", "filter res", controlspec.new(0.01, 1, 'exp', 0, 0.1))
+  params:add_control("saturation", "saturation", controlspec.new(0, 2, 'lin', 0, 0.5))
+  params:add_control("stereo_width", "stereo width", controlspec.new(0, 1, 'lin', 0, 0.25))
+  params:add_control("amp", "master volume", controlspec.new(0, 2, 'lin', 0, 0.5))
   params:set_action("lpf_freq", function(v) engine.lpf_freq(v) end)
-  params:set_action("lpf_res", function(v) engine.lpf_res(v) end)
+  params:set_action("saturation", function(v) engine.saturation(v) end)
+  params:set_action("stereo_width", function(v) engine.stereo_width(v) end)
+  params:set_action("amp", function(v) engine.amp(v) end)
 
   -- LAGARTAS (caterpillar bandmates)
   params:add_group("lagartas", "LAGARTAS", 5)
@@ -1430,7 +1462,7 @@ end
 
 function enc(n, d)
   if n == 1 then
-    page = util.clamp(page + d, 1, 6)
+    page = util.clamp(page + d, 1, 7)
 
   elseif page == 1 then -- QUANTUSSY
     if n == 2 then
@@ -1487,11 +1519,20 @@ function enc(n, d)
 
   elseif page == 6 then -- LAGARTA
     if n == 2 then
-      if k3_held then params:delta("sub_level", d)     -- K3+E2: sub level
+      if k3_held then params:delta("sub_level", d)
       else cat_selected = util.clamp(cat_selected + d, 1, #SPECIES_ORDER) end
     elseif n == 3 then
-      if k3_held then params:delta("chaos", d)         -- K3+E3: chaos
+      if k3_held then params:delta("chaos", d)
       else params:delta("cat_aggression", d) end
+    end
+
+  elseif page == 7 then -- MASTER
+    if n == 2 then
+      if k3_held then params:delta("eq_lo_gain", d)    -- K3+E2: low EQ
+      else params:delta("amp", d) end
+    elseif n == 3 then
+      if k3_held then params:delta("eq_hi_gain", d)    -- K3+E3: high EQ
+      else params:delta("saturation", d) end
     end
   end
 end
@@ -1572,9 +1613,9 @@ function redraw()
   screen.font_size(8)
 
   -- page tabs (6 compact tabs)
-  for i = 1, 6 do
+  for i = 1, 7 do
     screen.level(i == page and 15 or 3)
-    screen.move(1 + (i-1) * 21, 7)
+    screen.move(1 + (i-1) * 18, 7)
     screen.text(PAGES[i])
   end
   screen.level(1)
@@ -1587,7 +1628,8 @@ function redraw()
   elseif page == 3 then draw_gongs()
   elseif page == 4 then draw_rolz()
   elseif page == 5 then draw_tape()
-  elseif page == 6 then draw_lagartas() end
+  elseif page == 6 then draw_lagartas()
+  elseif page == 7 then draw_master() end
 
   -- chaos burst sparks
   if chaos_burst > 0.05 then
@@ -2274,6 +2316,96 @@ function draw_lagartas()
   pcall(function() agg_val = params:get("cat_aggression") end)
   screen.move(108, 11)
   screen.text(string.format("%.1f", agg_val))
+end
+
+------------------------------------------------------------
+-- page 7: MASTER
+------------------------------------------------------------
+
+function draw_master()
+  screen.font_size(8)
+
+  -- mixer section: 6 vertical bars
+  local voices = {"QNTSY","SUB","BASS","B.CLK","CLICK","GONG"}
+  local voice_params = {"mix_quantussy","mix_sub","mix_bass_body","mix_bass_click","mix_clicker","mix_gongs"}
+  local bar_w = 8
+  local bar_h = 28
+  local bar_y = 30
+
+  for i = 1, 6 do
+    local x = 2 + (i-1) * 14
+    local val = 0
+    pcall(function() val = params:get(voice_params[i]) end)
+    local fill_h = math.floor((val / 2) * bar_h)
+
+    -- bar outline
+    screen.level(3)
+    screen.rect(x, bar_y, bar_w, bar_h)
+    screen.stroke()
+    -- bar fill
+    screen.level(val > 0.01 and 10 or 1)
+    screen.rect(x, bar_y + bar_h - fill_h, bar_w, fill_h)
+    screen.fill()
+    -- label
+    screen.level(6)
+    screen.font_size(5)
+    screen.move(x, bar_y + bar_h + 6)
+    screen.text(voices[i])
+  end
+
+  -- EQ section (right side)
+  screen.font_size(7)
+  local lo_g = 0; pcall(function() lo_g = params:get("eq_lo_gain") end)
+  local mid_g = 0; pcall(function() mid_g = params:get("eq_mid_gain") end)
+  local hi_g = 0; pcall(function() hi_g = params:get("eq_hi_gain") end)
+
+  -- EQ curve visualization
+  screen.level(6)
+  screen.move(88, 40)
+  for x = 0, 38 do
+    local freq_norm = x / 38 -- 0=low, 1=high
+    local y_off = 0
+    -- approximate EQ curve
+    if freq_norm < 0.3 then y_off = lo_g * (0.3 - freq_norm) / 0.3
+    elseif freq_norm < 0.6 then y_off = mid_g * (1 - math.abs(freq_norm - 0.45) / 0.15) * 0.7
+    else y_off = hi_g * (freq_norm - 0.6) / 0.4 end
+    screen.line(88 + x, 40 - y_off * 1.2)
+  end
+  screen.stroke()
+  -- zero line
+  screen.level(2)
+  screen.move(88, 40)
+  screen.line(126, 40)
+  screen.stroke()
+
+  -- EQ labels
+  screen.font_size(6)
+  screen.level(lo_g ~= 0 and 12 or 4)
+  screen.move(88, 50)
+  screen.text("L" .. string.format("%+.0f", lo_g))
+  screen.level(mid_g ~= 0 and 12 or 4)
+  screen.move(102, 50)
+  screen.text("M" .. string.format("%+.0f", mid_g))
+  screen.level(hi_g ~= 0 and 12 or 4)
+  screen.move(116, 50)
+  screen.text("H" .. string.format("%+.0f", hi_g))
+
+  -- master level + saturation
+  screen.font_size(8)
+  local amp_val = 0.5; pcall(function() amp_val = params:get("amp") end)
+  local sat_val = 0.5; pcall(function() sat_val = params:get("saturation") end)
+
+  screen.level(8); screen.move(88, 18); screen.text("vol")
+  screen.level(15); screen.move(108, 18); screen.text(string.format("%.2f", amp_val))
+
+  screen.level(8); screen.move(88, 27); screen.text("sat")
+  screen.level(15); screen.move(108, 27); screen.text(string.format("%.2f", sat_val))
+
+  -- master level bar at bottom
+  screen.level(3); screen.rect(88, 55, 38, 4); screen.stroke()
+  screen.level(amp_val > 1 and 15 or 10)
+  screen.rect(88, 55, math.floor(util.clamp(amp_val / 2, 0, 1) * 38), 4)
+  screen.fill()
 end
 
 ------------------------------------------------------------
