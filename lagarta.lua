@@ -819,6 +819,12 @@ function lagarta_think(species_key)
     stage_info = LIFECYCLE[L.stage]
     local agg = agg_base * stage_info.intensity
 
+    -- helper: random in range (must be declared before any goto)
+    local function rr(lo, hi) return lo + math.random() * (hi - lo) end
+
+    local root = 55
+    pcall(function() root = params:get("q_freq1") end)
+
     -- EGG: barely alive, tiny random parameter hints
     if L.stage == 1 then
       if math.random() < 0.05 * agg then
@@ -867,12 +873,6 @@ function lagarta_think(species_key)
     if L.stage == 5 then
       agg = agg * 1.5 -- butterfly is 1.5x more powerful than caterpillar peak
     end
-
-    -- helper: random in range
-    local function rr(lo, hi) return lo + math.random() * (hi - lo) end
-
-    local root = 55
-    pcall(function() root = params:get("q_freq1") end)
 
     --------------------------------------------
     -- VERDE: melodic powerhouse
