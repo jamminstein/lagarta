@@ -730,259 +730,222 @@ function lagarta_think(species_key)
     local agg = agg_base
     L.tick = L.tick + 1
 
-    --------------------------------------------
-    -- VERDE: melodic friend
-    --------------------------------------------
-    if species_key == "verde" then
-      -- tune quantussy oscillators to consonant intervals from root
-      if math.random() < 0.25 * agg then
-        local root = 36
-        pcall(function() root = params:get("q_freq1") end)
-        local i = math.random(1, 5)
-        local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
-        target = util.clamp(target, 20, 2000)
-        -- gentle drift toward target
-        pcall(function()
-          local cur = params:get("q_freq" .. i)
-          set_safe("q_freq" .. i, cur + (target - cur) * 0.15 * agg)
-        end)
-      end
-      -- prefer long click decays (melodic)
-      if math.random() < 0.15 * agg then
-        local dec = sp.click_decay_range[1] + math.random() * (sp.click_decay_range[2] - sp.click_decay_range[1])
-        set_safe("click_decay", dec)
-      end
-      -- keep fold and chaos low
-      if math.random() < 0.1 then
-        local fold_target = sp.fold_range[1] + math.random() * (sp.fold_range[2] - sp.fold_range[1])
-        nudge("q_fold", (fold_target - (params:get("q_fold") or 0.3)) * 0.1 * agg, 0, 1)
-      end
-      if math.random() < 0.1 then
-        local chaos_target = sp.chaos_range[1] + math.random() * (sp.chaos_range[2] - sp.chaos_range[1])
-        nudge("chaos", (chaos_target - (params:get("chaos") or 0.3)) * 0.08 * agg, 0, 1)
-      end
-      -- bass tracks scale notes at lower octaves
-      if math.random() < 0.2 * agg and #scale_notes > 0 then
-        local note = scale_notes[math.random(1, math.min(5, #scale_notes))]
-        local bass_freq = musicutil.note_num_to_freq(math.max(note - 12, 20))
-        set_safe("bass_freq", util.clamp(bass_freq, 20, 200))
-        set_safe("sub_freq", util.clamp(musicutil.note_num_to_freq(math.max(note - 24, 15)), 15, 200))
-      end
-      -- boost sub gently
-      if math.random() < 0.1 then
-        nudge("sub_level", sp.sub_love * 0.02 * agg, 0, 1)
-      end
-      -- gongs tuned to harmonics
-      if math.random() < 0.12 * agg then
-        local gi = math.random(1, 4)
-        local root = 80
-        pcall(function() root = params:get("gong1") end)
-        local target = harmonic_freq(root, sp.intervals)
-        target = util.clamp(target, 50, 5000)
-        pcall(function()
-          local cur = params:get("gong" .. gi)
-          set_safe("gong" .. gi, cur + (target - cur) * 0.12 * agg)
-        end)
-      end
-      -- gong decay in species range
-      if math.random() < 0.08 then
-        local dec = sp.gong_decay_range[1] + math.random() * (sp.gong_decay_range[2] - sp.gong_decay_range[1])
-        set_safe("gong_decay", dec)
-      end
+    -- helper: random in range
+    local function rr(lo, hi) return lo + math.random() * (hi - lo) end
+
+    local root = 55
+    pcall(function() root = params:get("q_freq1") end)
 
     --------------------------------------------
-    -- VENENOSA: venomous chaos
+    -- VERDE: melodic powerhouse
+    --------------------------------------------
+    if species_key == "verde" then
+      -- retune ALL quantussy to consonant harmony
+      for i = 1, 5 do
+        if math.random() < 0.4 * agg then
+          local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
+          set_safe("q_freq" .. i, util.clamp(target, 20, 2000))
+        end
+      end
+      -- cross mod and fold: musical ranges
+      set_safe("q_fold", rr(sp.fold_range[1], sp.fold_range[2]))
+      if math.random() < 0.5 then set_safe("q_cross", rr(0.1, 0.5)) end
+      set_safe("q_bounds", rr(0.3, 0.8))
+      set_safe("q_mix", rr(0.15, 0.4))
+      -- clicker: melodic pitch from scale, longer decay
+      if #scale_notes > 0 then
+        local note = scale_notes[math.random(1, #scale_notes)]
+        set_safe("click_pitch", musicutil.note_num_to_freq(note))
+        set_safe("bass_click_pitch", musicutil.note_num_to_freq(math.max(note - 12, 20)))
+        set_safe("sub_freq", musicutil.note_num_to_freq(math.max(note - 24, 15)))
+      end
+      set_safe("click_decay", rr(sp.click_decay_range[1], sp.click_decay_range[2]))
+      set_safe("click_ring", rr(0.2, 0.6))
+      if math.random() < 0.3 then set_safe("click_rate", rr(1, 8)) end
+      set_safe("click_amp", rr(0.4, 0.8))
+      -- bass: warm and present
+      set_safe("bass_level", rr(0.15, 0.4))
+      set_safe("bass_decay", rr(0.1, 0.4))
+      set_safe("sub_level", rr(0.1, sp.sub_love + 0.2))
+      -- gongs: harmonic tuning, long decay
+      for i = 1, 4 do
+        if math.random() < 0.4 * agg then
+          local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
+          set_safe("gong" .. i, util.clamp(target * ({1,2,4})[math.random(1,3)], 50, 5000))
+        end
+      end
+      set_safe("gong_decay", rr(sp.gong_decay_range[1], sp.gong_decay_range[2]))
+      set_safe("gong_amp", rr(0.3, 0.6))
+      -- filter: warm
+      set_safe("lpf_freq", rr(2000, 5000))
+      -- chaos: keep low
+      set_safe("chaos", rr(sp.chaos_range[1], sp.chaos_range[2]))
+
+    --------------------------------------------
+    -- VENENOSA: venomous unpredictable chaos
     --------------------------------------------
     elseif species_key == "venenosa" then
-      -- detune to dissonant intervals
+      -- detune ALL quantussy to dissonant intervals
+      for i = 1, 5 do
+        if math.random() < 0.6 * agg then
+          set_safe("q_freq" .. i, util.clamp(harmonic_freq(root, sp.intervals), 20, 2000))
+        end
+      end
+      -- extreme fold, high cross, tight bounds
+      set_safe("q_fold", rr(sp.fold_range[1], sp.fold_range[2]))
+      set_safe("q_cross", rr(0.4, 0.9))
+      set_safe("q_bounds", rr(0.1, 0.5))
+      set_safe("q_mix", rr(0.2, 0.6))
+      -- clicker: harsh, erratic
+      set_safe("click_pitch", rr(50, 3000))
+      set_safe("click_decay", rr(sp.click_decay_range[1], sp.click_decay_range[2]))
+      set_safe("click_ring", rr(0.5, 1.0))
+      set_safe("click_rate", rr(0.5, 25 * agg))
+      set_safe("click_amp", rr(0.5, 0.9))
+      -- bass: harsh pitch shifts
+      set_safe("bass_click_pitch", rr(20, 400))
+      set_safe("bass_click_decay", rr(0.01, 0.15))
+      set_safe("bass_level", rr(0.1, 0.5))
+      set_safe("sub_freq", rr(15, 120))
+      set_safe("sub_level", rr(0, 0.3))
+      -- gongs: dissonant, unpredictable
+      for i = 1, 4 do
+        if math.random() < 0.5 * agg then
+          set_safe("gong" .. i, util.clamp(harmonic_freq(rr(80, 800), sp.intervals), 50, 5000))
+        end
+      end
+      set_safe("gong_decay", rr(sp.gong_decay_range[1], sp.gong_decay_range[2]))
+      set_safe("gong_amp", rr(0.2, 0.7))
+      -- chaos: push high
+      set_safe("chaos", rr(sp.chaos_range[1], sp.chaos_range[2]))
+      -- filter: erratic
+      set_safe("lpf_freq", rr(500, 8000))
+      -- rolz: spike
       if math.random() < 0.4 * agg then
-        local i = math.random(1, 5)
-        local root = 100 + math.random() * 400
-        pcall(function() root = params:get("q_freq1") end)
-        local target = harmonic_freq(root, sp.intervals)
-        target = util.clamp(target, 20, 2000)
-        set_safe("q_freq" .. i, target)
+        set_safe("rolz_to_click", rr(0, 0.7))
+        set_safe("rolz_cascade", rr(0.2, 0.9))
+        set_safe("rolz_r" .. math.random(1,4), rr(0.5, 15))
       end
-      -- push fold and chaos high
-      if math.random() < 0.3 * agg then
-        local fold_target = sp.fold_range[1] + math.random() * (sp.fold_range[2] - sp.fold_range[1])
-        nudge("q_fold", (fold_target - (params:get("q_fold") or 0.5)) * 0.2 * agg, 0, 1)
-      end
-      if math.random() < 0.25 * agg then
-        local chaos_target = sp.chaos_range[1] + math.random() * (sp.chaos_range[2] - sp.chaos_range[1])
-        nudge("chaos", (chaos_target - (params:get("chaos") or 0.3)) * 0.15 * agg, 0, 1)
-      end
-      -- short harsh clicks
-      if math.random() < 0.2 * agg then
-        local dec = sp.click_decay_range[1] + math.random() * (sp.click_decay_range[2] - sp.click_decay_range[1])
-        set_safe("click_decay", dec)
-      end
-      -- erratic rate changes
-      if math.random() < 0.25 * agg then
-        nudge("click_rate", (math.random() - 0.3) * 4 * agg, 0.1, 40)
-      end
-      -- occasional chaos bursts
-      if math.random() < 0.06 * agg then
-        do_chaos_burst()
-      end
-      -- mess with patchbay connections
-      if math.random() < 0.08 * agg then
+      -- chaos bursts
+      if math.random() < 0.12 * agg then do_chaos_burst() end
+      -- patchbay mutations
+      if math.random() < 0.15 * agg then
         local s = math.random(1, #MOD_SRC_NAMES)
         local d = math.random(1, #MOD_DST_NAMES)
         patch[s][d] = math.random(0, 3)
         grid_dirty = true
       end
-      -- dissonant gong tuning
-      if math.random() < 0.15 * agg then
-        local gi = math.random(1, 4)
-        local root = 200 + math.random() * 800
-        local target = harmonic_freq(root, sp.intervals)
-        set_safe("gong" .. gi, util.clamp(target, 50, 5000))
-      end
-      -- short gong decay
-      if math.random() < 0.1 then
-        local dec = sp.gong_decay_range[1] + math.random() * (sp.gong_decay_range[2] - sp.gong_decay_range[1])
-        set_safe("gong_decay", dec)
-      end
-      -- bass: harsh pitch shifts
-      if math.random() < 0.15 * agg then
-        set_safe("bass_click_pitch", 20 + math.random() * 380)
-      end
 
     --------------------------------------------
-    -- SEDA: silk ambient
+    -- SEDA: deep ambient sculptor
     --------------------------------------------
     elseif species_key == "seda" then
-      -- very slow drift toward consonance
-      if math.random() < 0.12 * agg then
+      -- quantussy: slow consonant drift
+      if math.random() < 0.3 * agg then
         local i = math.random(1, 5)
-        local root = 36
-        pcall(function() root = params:get("q_freq1") end)
         local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
-        target = util.clamp(target, 20, 2000)
-        pcall(function()
-          local cur = params:get("q_freq" .. i)
-          set_safe("q_freq" .. i, cur + (target - cur) * 0.04 * agg)
-        end)
+        local cur = params:get("q_freq" .. i) or root
+        set_safe("q_freq" .. i, util.clamp(cur + (target - cur) * 0.15 * agg, 20, 2000))
       end
-      -- minimal fold, lowest chaos
-      if math.random() < 0.08 then
-        local fold_target = sp.fold_range[1] + math.random() * (sp.fold_range[2] - sp.fold_range[1])
-        nudge("q_fold", (fold_target - (params:get("q_fold") or 0.3)) * 0.05 * agg, 0, 1)
+      -- fold: minimal. cross: medium for shimmer
+      set_safe("q_fold", rr(sp.fold_range[1], sp.fold_range[2]))
+      set_safe("q_cross", rr(0.15, 0.45))
+      set_safe("q_bounds", rr(0.4, 0.9))
+      set_safe("q_mix", rr(0.1, 0.35))
+      -- clicker: sparse, long, quiet
+      set_safe("click_decay", rr(sp.click_decay_range[1], sp.click_decay_range[2]))
+      set_safe("click_ring", rr(0.1, 0.4))
+      if math.random() < 0.2 then set_safe("click_rate", rr(0.2, 2)) end
+      set_safe("click_amp", rr(0.1, 0.4))
+      if #scale_notes > 0 then
+        local note = scale_notes[math.random(1, math.min(3, #scale_notes))]
+        set_safe("click_pitch", musicutil.note_num_to_freq(note))
       end
-      if math.random() < 0.08 then
-        local chaos_target = sp.chaos_range[1] + math.random() * (sp.chaos_range[2] - sp.chaos_range[1])
-        nudge("chaos", (chaos_target - (params:get("chaos") or 0.3)) * 0.04 * agg, 0, 1)
-      end
-      -- maximum gong decay (long resonance)
-      if math.random() < 0.1 then
-        local dec = sp.gong_decay_range[1] + math.random() * (sp.gong_decay_range[2] - sp.gong_decay_range[1])
-        set_safe("gong_decay", dec)
-      end
-      -- boost sub, quiet clicks
-      if math.random() < 0.1 then
-        nudge("sub_level", sp.sub_love * 0.03 * agg, 0, 1)
-      end
-      if math.random() < 0.08 then
-        nudge("click_amp", -0.02 * agg, 0, 1)
-      end
-      -- long click decays
-      if math.random() < 0.1 then
-        local dec = sp.click_decay_range[1] + math.random() * (sp.click_decay_range[2] - sp.click_decay_range[1])
-        set_safe("click_decay", dec)
-      end
-      -- engage tape feedback if playing
-      if tape_playing and math.random() < 0.05 * agg then
-        nudge("tape_feedback", 0.02 * agg, 0, 0.95)
-      end
-      -- gongs: gentle harmonic tuning
-      if math.random() < 0.08 * agg then
-        local gi = math.random(1, 4)
-        local root = 80
-        pcall(function() root = params:get("gong1") end)
-        local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
-        target = util.clamp(target, 50, 5000)
-        pcall(function()
-          local cur = params:get("gong" .. gi)
-          set_safe("gong" .. gi, cur + (target - cur) * 0.06 * agg)
-        end)
-      end
-      -- bass: track scale at low octaves
-      if math.random() < 0.08 * agg and #scale_notes > 0 then
+      -- sub: deep, present
+      set_safe("sub_level", rr(0.3, sp.sub_love + 0.3))
+      set_safe("sub_freq", rr(20, 60))
+      set_safe("sub_width", rr(0.1, 0.5))
+      -- bass: quiet
+      set_safe("bass_level", rr(0.05, 0.2))
+      set_safe("bass_decay", rr(0.3, 1.0))
+      if #scale_notes > 0 then
         local note = scale_notes[math.random(1, math.min(3, #scale_notes))]
         set_safe("bass_freq", util.clamp(musicutil.note_num_to_freq(math.max(note - 24, 15)), 20, 200))
       end
+      -- gongs: long resonance, harmonic
+      for i = 1, 4 do
+        if math.random() < 0.25 * agg then
+          local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
+          set_safe("gong" .. i, util.clamp(target * ({1,2,4})[math.random(1,3)], 50, 5000))
+        end
+      end
+      set_safe("gong_decay", rr(sp.gong_decay_range[1], sp.gong_decay_range[2]))
+      set_safe("gong_amp", rr(0.3, 0.6))
+      -- chaos: lowest
+      set_safe("chaos", rr(sp.chaos_range[1], sp.chaos_range[2]))
+      -- filter: dark, warm
+      set_safe("lpf_freq", rr(800, 3000))
+      -- tape: engage and modulate
+      if tape_playing then
+        set_safe("tape_feedback", rr(0.2, 0.7) * agg)
+        if math.random() < 0.3 then set_safe("tape_rate", rr(0.25, 1.5)) end
+      end
+      -- rolz: minimal
+      set_safe("rolz_to_click", rr(0, 0.1))
 
     --------------------------------------------
-    -- FOGO: fire rhythm
+    -- FOGO: polyrhythmic fire
     --------------------------------------------
     elseif species_key == "fogo" then
-      -- click rate locked to polyrhythmic ratios
-      if math.random() < 0.2 * agg then
-        local base_rate = 2
-        pcall(function() base_rate = params:get("click_rate") end)
-        local ratio = POLY_RATIOS[math.random(1, #POLY_RATIOS)]
-        local target = util.clamp(base_rate * ratio, 0.1, 40)
-        set_safe("click_rate", target)
+      -- quantussy: snap to scale, percussive
+      for i = 1, 5 do
+        if math.random() < 0.35 * agg then
+          local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
+          set_safe("q_freq" .. i, util.clamp(target, 20, 2000))
+        end
       end
-      -- rolz rates set to polyrhythmic ratios of each other
-      if math.random() < 0.25 * agg then
-        local base_r = 1
-        pcall(function() base_r = params:get("rolz_r1") end)
-        local i = math.random(2, 4)
-        local ratio = POLY_RATIOS[math.random(1, #POLY_RATIOS)]
-        set_safe("rolz_r" .. i, util.clamp(base_r * ratio, 0.01, 20))
+      set_safe("q_fold", rr(sp.fold_range[1], sp.fold_range[2]))
+      set_safe("q_cross", rr(0.2, 0.6))
+      set_safe("q_bounds", rr(0.3, 0.7))
+      set_safe("q_mix", rr(0.15, 0.4))
+      -- clicker: polyrhythmic rates, short punchy
+      local base_rate = rr(2, 8)
+      set_safe("click_rate", base_rate * POLY_RATIOS[math.random(1, #POLY_RATIOS)])
+      set_safe("click_decay", rr(sp.click_decay_range[1], sp.click_decay_range[2]))
+      set_safe("click_ring", rr(0.2, 0.7))
+      set_safe("click_amp", rr(0.5, 0.9))
+      if #scale_notes > 0 then
+        local note = scale_notes[math.random(1, #scale_notes)]
+        set_safe("click_pitch", musicutil.note_num_to_freq(note))
+        set_safe("bass_click_pitch", musicutil.note_num_to_freq(math.max(note - 12, 20)))
       end
-      -- increase rolz_to_click and cascade
-      if math.random() < 0.2 * agg then
-        nudge("rolz_to_click", 0.03 * agg, 0, 1)
+      -- bass: rhythmic, heavy
+      set_safe("bass_level", rr(0.2, 0.5))
+      set_safe("bass_decay", rr(0.05, 0.25))
+      if #scale_notes > 0 then
+        local note = scale_notes[math.random(1, math.min(5, #scale_notes))]
+        set_safe("bass_freq", util.clamp(musicutil.note_num_to_freq(math.max(note - 12, 20)), 20, 200))
       end
-      if math.random() < 0.15 * agg then
-        nudge("rolz_cascade", 0.025 * agg, 0, 1)
+      set_safe("sub_level", rr(0.15, sp.sub_love + 0.2))
+      -- rolz: polyrhythmic cascade
+      set_safe("rolz_r1", rr(0.5, 6))
+      for i = 2, 4 do
+        set_safe("rolz_r" .. i, util.clamp(params:get("rolz_r1") * POLY_RATIOS[math.random(1, #POLY_RATIOS)], 0.01, 20))
       end
-      -- short percussive decays
-      if math.random() < 0.15 * agg then
-        local dec = sp.click_decay_range[1] + math.random() * (sp.click_decay_range[2] - sp.click_decay_range[1])
-        set_safe("click_decay", dec)
+      set_safe("rolz_to_click", rr(0.2, 0.7))
+      set_safe("rolz_cascade", rr(0.3, 0.8))
+      -- gongs: percussive tuning
+      for i = 1, 4 do
+        if math.random() < 0.35 * agg then
+          set_safe("gong" .. i, util.clamp(harmonic_freq(root, sp.intervals) * ({1,2,4})[math.random(1,3)], 50, 5000))
+        end
       end
-      -- fold and chaos in species range
-      if math.random() < 0.15 then
-        local fold_target = sp.fold_range[1] + math.random() * (sp.fold_range[2] - sp.fold_range[1])
-        nudge("q_fold", (fold_target - (params:get("q_fold") or 0.3)) * 0.12 * agg, 0, 1)
-      end
-      if math.random() < 0.12 then
-        local chaos_target = sp.chaos_range[1] + math.random() * (sp.chaos_range[2] - sp.chaos_range[1])
-        nudge("chaos", (chaos_target - (params:get("chaos") or 0.3)) * 0.1 * agg, 0, 1)
-      end
-      -- bass body tuned to scale, rhythmic
-      if math.random() < 0.15 * agg and #scale_notes > 0 then
-        local note = scale_notes[math.random(1, math.min(7, #scale_notes))]
-        local bass_freq = musicutil.note_num_to_freq(math.max(note - 12, 20))
-        set_safe("bass_freq", util.clamp(bass_freq, 20, 200))
-        set_safe("bass_click_pitch", util.clamp(bass_freq * 1.5, 20, 400))
-      end
-      -- gong tuning: percussive
-      if math.random() < 0.1 * agg then
-        local gi = math.random(1, 4)
-        local root = 150
-        pcall(function() root = params:get("gong1") end)
-        local target = harmonic_freq(root, sp.intervals)
-        set_safe("gong" .. gi, util.clamp(target, 50, 5000))
-      end
-      -- gong decay: short to medium
-      if math.random() < 0.08 then
-        local dec = sp.gong_decay_range[1] + math.random() * (sp.gong_decay_range[2] - sp.gong_decay_range[1])
-        set_safe("gong_decay", dec)
-      end
-      -- quantussy: tune to scale with snap
-      if math.random() < 0.15 * agg then
-        local i = math.random(1, 5)
-        local root = 55
-        pcall(function() root = params:get("q_freq1") end)
-        local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
-        target = util.clamp(target, 20, 2000)
-        set_safe("q_freq" .. i, target)
-      end
+      set_safe("gong_decay", rr(sp.gong_decay_range[1], sp.gong_decay_range[2]))
+      set_safe("gong_amp", rr(0.3, 0.7))
+      -- chaos: moderate
+      set_safe("chaos", rr(sp.chaos_range[1], sp.chaos_range[2]))
+      -- filter: bright for attack
+      set_safe("lpf_freq", rr(2500, 7000))
     end
 
     --------------------------------------------
@@ -1040,7 +1003,92 @@ function lagarta_think(species_key)
   end
 end
 
+-- LFO modulation: runs at 30Hz for continuous parameter animation
+function update_lagarta_lfos()
+  local t = frame * (1/30) -- time in seconds
+  local agg = 0.5
+  pcall(function() agg = params:get("cat_aggression") end)
+
+  for species_key, L in pairs(lagartas) do
+    if not (L and L.active) then goto next_lfo end
+
+    if species_key == "verde" then
+      -- slow sine LFOs: gentle harmonic breathing
+      local lfo1 = math.sin(t * 0.3) * agg  -- ~0.3 Hz
+      local lfo2 = math.sin(t * 0.17) * agg -- ~0.17 Hz
+      local lfo3 = math.sin(t * 0.23 + 1) * agg
+      nudge("q_cross", lfo1 * 0.008, 0, 1)
+      nudge("q_fold", lfo2 * 0.006, 0, 1)
+      nudge("click_ring", lfo3 * 0.005, 0, 1)
+      -- pitch vibrato: gentle wobble on click pitch
+      local vib = math.sin(t * 2.5) * agg * 8
+      pcall(function() engine.click_pitch(params:get("click_pitch") + vib) end)
+      -- sub pulse: breathe with slow LFO
+      nudge("sub_level", math.sin(t * 0.1) * agg * 0.005, 0, 1)
+      -- filter sweep
+      pcall(function() engine.lpf_freq(params:get("lpf_freq") + math.sin(t * 0.2) * agg * 400) end)
+
+    elseif species_key == "venenosa" then
+      -- jagged LFOs: sample-and-hold style, fast, unpredictable
+      local lfo1 = (math.sin(t * 3.7) > 0.3) and agg or -agg  -- square-ish
+      local lfo2 = math.sin(t * 5.1 + math.sin(t * 1.3) * 3) * agg  -- FM chaos
+      local lfo3 = (math.floor(t * 7) % 3 - 1) * agg  -- stepped
+      nudge("q_fold", lfo1 * 0.015, 0, 1)
+      nudge("chaos", lfo2 * 0.01, 0, 1)
+      nudge("q_cross", lfo3 * 0.01, 0, 1)
+      -- erratic pitch jumps
+      pcall(function() engine.click_pitch(params:get("click_pitch") + lfo2 * 80) end)
+      -- filter: rapid sweeps
+      pcall(function() engine.lpf_freq(params:get("lpf_freq") + lfo1 * 1500) end)
+      -- rolz rate modulation
+      nudge("rolz_cascade", math.sin(t * 2.3) * agg * 0.01, 0, 1)
+      -- gong amp pulsing
+      nudge("gong_amp", lfo3 * 0.008, 0, 1)
+
+    elseif species_key == "seda" then
+      -- ultra-slow glacial LFOs: tide-like
+      local lfo1 = math.sin(t * 0.05) * agg  -- ~20 second cycle
+      local lfo2 = math.sin(t * 0.08 + 2) * agg
+      local lfo3 = math.sin(t * 0.03) * agg  -- ~33 second cycle
+      nudge("q_mix", lfo1 * 0.003, 0, 1)
+      nudge("sub_level", lfo2 * 0.004, 0, 1)
+      nudge("gong_decay", lfo3 * 0.03, 0.1, 10)
+      -- filter: slow dark sweep
+      pcall(function() engine.lpf_freq(params:get("lpf_freq") + lfo1 * 300) end)
+      -- tape modulation
+      if tape_playing then
+        nudge("tape_rate", math.sin(t * 0.07) * agg * 0.01, -4, 4)
+        nudge("tape_feedback", math.sin(t * 0.04) * agg * 0.003, 0, 0.95)
+      end
+      -- sub freq drift
+      pcall(function() engine.sub_freq(params:get("sub_freq") + lfo3 * 3) end)
+
+    elseif species_key == "fogo" then
+      -- rhythmic LFOs: synced to pulse, sharp edges
+      local pulse_rate = 4
+      pcall(function() pulse_rate = params:get("click_rate") end)
+      local lfo1 = math.sin(t * pulse_rate * 0.5) * agg  -- half click rate
+      local lfo2 = math.abs(math.sin(t * pulse_rate * 0.25)) * agg  -- rectified quarter
+      local lfo3 = (math.sin(t * pulse_rate * 0.33) > 0) and agg or 0  -- gate
+      nudge("click_amp", lfo1 * 0.01, 0, 1)
+      nudge("rolz_to_click", lfo2 * 0.008, 0, 1)
+      nudge("bass_level", lfo3 * 0.005, 0, 1)
+      -- pitch accent on strong beats
+      pcall(function() engine.click_pitch(params:get("click_pitch") + lfo2 * 40) end)
+      -- filter: rhythmic opening
+      pcall(function() engine.lpf_freq(params:get("lpf_freq") + lfo2 * 800) end)
+      -- gong amp: rhythmic swell
+      nudge("gong_amp", lfo1 * 0.006, 0, 1)
+    end
+
+    ::next_lfo::
+  end
+end
+
 function update_all_lagartas()
+  -- run LFOs first
+  update_lagarta_lfos()
+
   for species_key, L in pairs(lagartas) do
     if L and L.active then
       local sp = L.spec
