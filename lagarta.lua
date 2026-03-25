@@ -153,6 +153,22 @@ local SPECIES = {
 }
 local SPECIES_ORDER = {"verde", "venenosa", "seda", "fogo"}
 
+-- lifecycle stages: each lagarta evolves through these acts
+local LIFECYCLE = {
+  {name = "EGG",       duration = 16, -- beats: quiet pulsing, barely there
+   intensity = 0.1, size_mult = 0.3, speed_mult = 0, desc = "dormant"},
+  {name = "LARVA",     duration = 64, -- hungry: learning, small changes, growing
+   intensity = 0.4, size_mult = 0.6, speed_mult = 0.5, desc = "learning"},
+  {name = "CATERPILLAR", duration = 128, -- full power: peak musical interference
+   intensity = 1.0, size_mult = 1.0, speed_mult = 1.0, desc = "peak"},
+  {name = "PUPA",      duration = 48, -- cocooned: still, parameters freezing, internal transformation
+   intensity = 0.2, size_mult = 0.7, speed_mult = 0.1, desc = "transforming"},
+  {name = "BUTTERFLY", duration = 96, -- transcendent: ethereal, beautiful, maximal expression
+   intensity = 1.5, size_mult = 1.3, speed_mult = 1.5, desc = "transcendent"},
+  {name = "FADE",      duration = 32, -- departing: slowly dissolving, returning params to anchors
+   intensity = 0.3, size_mult = 0.8, speed_mult = 0.3, desc = "departing"},
+}
+
 -- caterpillar instances (up to 4 active)
 local lagartas = {}
 local active_species = {}
@@ -708,6 +724,12 @@ function create_lagarta(species_key)
     spec = sp,
     active = true,
     tick = 0,
+    -- lifecycle
+    stage = 1,        -- current lifecycle stage (1=EGG, 2=LARVA, etc.)
+    stage_tick = 0,    -- beats in current stage
+    life_tick = 0,     -- total beats alive
+    has_cocooned = false,
+    anchors = {},      -- saved params at birth for FADE stage
     -- visual state
     x = math.random(10, 118),
     y = math.random(18, 55),
@@ -715,12 +737,23 @@ function create_lagarta(species_key)
     dy = (math.random() - 0.5) * 0.3,
     segments = {},
     particles = {},
+    wing_angle = 0,   -- for butterfly stage
+    cocoon_progress = 0,
     -- memory system
     memory = {},
     best_memory = nil,
     -- clock
     clock_id = nil,
   }
+  -- save birth anchors for FADE
+  pcall(function()
+    for i = 1, 5 do L.anchors["q_freq"..i] = params:get("q_freq"..i) end
+    L.anchors.q_fold = params:get("q_fold")
+    L.anchors.q_cross = params:get("q_cross")
+    L.anchors.chaos = params:get("chaos")
+    L.anchors.click_rate = params:get("click_rate")
+    for i = 1, 4 do L.anchors["gong"..i] = params:get("gong"..i) end
+  end)
   -- init segments
   for i = 1, sp.seg_count do
     L.segments[i] = {x = L.x - (i - 1) * 3, y = L.y}
@@ -759,8 +792,81 @@ function lagarta_think(species_key)
 
   while L.active and lagartas[species_key] do
     pcall(function() agg_base = params:get("cat_aggression") end)
-    local agg = agg_base
     L.tick = L.tick + 1
+    L.life_tick = L.life_tick + 1
+    L.stage_tick = L.stage_tick + 1
+
+    -- lifecycle stage progression
+    local stage_info = LIFECYCLE[L.stage]
+    if L.stage_tick >= stage_info.duration then
+      L.stage_tick = 0
+      if L.stage < #LIFECYCLE then
+        L.stage = L.stage + 1
+      else
+        -- after FADE: rebirth as EGG (endless cycle)
+        L.stage = 1
+        -- save new anchors
+        pcall(function()
+          for i = 1, 5 do L.anchors["q_freq"..i] = params:get("q_freq"..i) end
+          L.anchors.q_fold = params:get("q_fold")
+          L.anchors.chaos = params:get("chaos")
+          L.anchors.click_rate = params:get("click_rate")
+        end)
+      end
+    end
+
+    -- scale aggression by lifecycle intensity
+    stage_info = LIFECYCLE[L.stage]
+    local agg = agg_base * stage_info.intensity
+
+    -- EGG: barely alive, tiny random parameter hints
+    if L.stage == 1 then
+      if math.random() < 0.05 * agg then
+        local i = math.random(1, 5)
+        nudge("q_freq" .. i, (math.random() - 0.5) * 2, 20, 2000)
+      end
+      -- skip main species behavior in EGG
+      goto stage_done
+    end
+
+    -- PUPA: frozen in cocoon, internal transformation
+    if L.stage == 4 then
+      L.cocoon_progress = L.stage_tick / stage_info.duration
+      -- slowly morph intervals: blend species intervals toward butterfly transcendence
+      if math.random() < 0.1 then
+        local i = math.random(1, 5)
+        local root = 55
+        pcall(function() root = params:get("q_freq1") end)
+        -- during pupa, blend consonant + dissonant = complex harmony
+        local mixed = {}
+        for _, v in ipairs(CONSONANT) do table.insert(mixed, v) end
+        for _, v in ipairs(DISSONANT) do table.insert(mixed, v) end
+        local target = snap_freq_to_scale(harmonic_freq(root, mixed))
+        pcall(function()
+          local cur = params:get("q_freq" .. i)
+          set_safe("q_freq" .. i, cur + (target - cur) * 0.03)
+        end)
+      end
+      goto stage_done
+    end
+
+    -- FADE: return everything to birth anchors
+    if L.stage == 6 then
+      local fade_pct = L.stage_tick / stage_info.duration
+      for k, v in pairs(L.anchors) do
+        pcall(function()
+          local cur = params:get(k)
+          set_safe(k, cur + (v - cur) * 0.08 * (1 - fade_pct * 0.5))
+        end)
+      end
+      goto stage_done
+    end
+
+    -- BUTTERFLY: transcendent — uses ALL intervals, pushes beyond species limits
+    -- amplified version of species behavior + extra cosmic touches
+    if L.stage == 5 then
+      agg = agg * 1.5 -- butterfly is 1.5x more powerful than caterpillar peak
+    end
 
     -- helper: random in range
     local function rr(lo, hi) return lo + math.random() * (hi - lo) end
@@ -980,6 +1086,8 @@ function lagarta_think(species_key)
       set_safe("lpf_freq", rr(2500, 7000))
     end
 
+    ::stage_done::
+
     --------------------------------------------
     -- memory system: save snapshot every 16 ticks
     --------------------------------------------
@@ -1043,6 +1151,13 @@ function update_lagarta_lfos()
 
   for species_key, L in pairs(lagartas) do
     if not (L and L.active) then goto next_lfo end
+    local stage_info = LIFECYCLE[L.stage] or LIFECYCLE[1]
+    local life_int = stage_info.intensity
+    -- EGG and PUPA: minimal LFO. BUTTERFLY: amplified
+    if L.stage == 1 or L.stage == 4 then life_int = 0.05
+    elseif L.stage == 5 then life_int = life_int * 1.5
+    elseif L.stage == 6 then life_int = life_int * 0.5 end
+    agg = agg * life_int
 
     if species_key == "verde" then
       -- slow sine LFOs: gentle harmonic breathing
@@ -1218,6 +1333,10 @@ function update_all_lagartas()
         elseif p.kind == "spark" then
           p.x = p.x + (math.random() - 0.5) * 0.8
           p.y = p.y + (math.random() - 0.5) * 0.8
+        elseif p.kind == "sparkle" then
+          p.x = p.x + (p.dx or 0)
+          p.y = p.y + (p.dy or 0) + 0.1 -- float upward
+          p.life = p.life - 0.15
         end
         if p.life > 0 then
           table.insert(new_particles, p)
@@ -1979,6 +2098,12 @@ function draw_lagartas()
           screen.level(util.clamp(math.floor(p.life * 1.2), 1, 15))
           screen.pixel(math.floor(p.x), math.floor(p.y))
           screen.fill()
+        elseif p.kind == "sparkle" then
+          -- butterfly trail: bright twinkling
+          local twinkle = math.sin(frame * 0.3 + p.x) > 0 and p.life or p.life * 0.5
+          screen.level(util.clamp(math.floor(twinkle * 1.5), 1, 15))
+          screen.pixel(math.floor(p.x), math.floor(p.y))
+          screen.fill()
         elseif p.kind == "dust" then
           screen.level(util.clamp(math.floor(p.life * 0.3), 1, 4))
           screen.pixel(math.floor(p.x), math.floor(p.y))
@@ -1993,6 +2118,100 @@ function draw_lagartas()
             screen.fill()
           end
         end
+      end
+
+      -- lifecycle stage visual
+      local stage_info = LIFECYCLE[L.stage] or LIFECYCLE[1]
+      local size_m = stage_info.size_mult
+
+      -- EGG: just a pulsing dot
+      if L.stage == 1 then
+        local pulse = math.sin(frame * 0.1) * 0.5 + 0.5
+        screen.level(util.clamp(math.floor(2 + pulse * 4), 1, 6))
+        screen.circle(L.x, L.y, 2 + pulse * 1.5)
+        screen.fill()
+        screen.level(3)
+        screen.font_size(5)
+        screen.move(L.x + 5, L.y - 2)
+        screen.text(sp.name)
+        screen.level(2)
+        screen.move(L.x + 5, L.y + 4)
+        screen.text("egg")
+        goto skip_body_draw
+      end
+
+      -- PUPA: cocoon
+      if L.stage == 4 then
+        local prog = L.cocoon_progress or 0
+        local cr = 5 + math.sin(frame * 0.05) * 1
+        screen.level(util.clamp(math.floor(4 + prog * 6), 1, 10))
+        screen.circle(L.x, L.y, cr)
+        screen.fill()
+        -- cocoon shell
+        screen.level(util.clamp(math.floor(2 + prog * 4), 1, 8))
+        screen.circle(L.x, L.y, cr + 2)
+        screen.stroke()
+        screen.circle(L.x, L.y, cr + 3.5)
+        screen.stroke()
+        -- inner transformation sparkle
+        if math.random() < prog * 0.5 then
+          screen.level(util.clamp(math.floor(8 + math.random() * 7), 1, 15))
+          screen.pixel(L.x + math.random(-3, 3), L.y + math.random(-3, 3))
+          screen.fill()
+        end
+        screen.level(5)
+        screen.font_size(5)
+        screen.move(L.x + 7, L.y - 2)
+        screen.text(sp.name)
+        screen.level(3)
+        screen.move(L.x + 7, L.y + 4)
+        screen.text(math.floor(prog * 100) .. "%")
+        goto skip_body_draw
+      end
+
+      -- BUTTERFLY: wings!
+      if L.stage == 5 then
+        L.wing_angle = (L.wing_angle or 0) + 0.08
+        local wing_spread = math.abs(math.sin(L.wing_angle)) * 8 * size_m
+        local head = L.segments[1]
+        if head then
+          -- left wing
+          screen.level(util.clamp(math.floor(sp.bright_base + 4), 1, 15))
+          screen.move(head.x, head.y)
+          screen.curve(head.x - wing_spread * 1.5, head.y - wing_spread,
+                       head.x - wing_spread * 1.2, head.y + wing_spread * 0.5,
+                       head.x, head.y + 2)
+          screen.fill()
+          -- right wing
+          screen.move(head.x, head.y)
+          screen.curve(head.x + wing_spread * 1.5, head.y - wing_spread,
+                       head.x + wing_spread * 1.2, head.y + wing_spread * 0.5,
+                       head.x, head.y + 2)
+          screen.fill()
+          -- inner wing pattern
+          screen.level(util.clamp(math.floor(sp.bright_base + 2), 1, 12))
+          screen.circle(head.x - wing_spread * 0.6, head.y - wing_spread * 0.2, wing_spread * 0.25)
+          screen.stroke()
+          screen.circle(head.x + wing_spread * 0.6, head.y - wing_spread * 0.2, wing_spread * 0.25)
+          screen.stroke()
+          -- trail particles
+          if math.random() < 0.6 then
+            table.insert(L.particles, {
+              x = head.x + (math.random() - 0.5) * 6,
+              y = head.y + math.random() * 4,
+              dx = (math.random() - 0.5) * 0.3,
+              dy = math.random() * 0.3,
+              life = 4 + math.random() * 4,
+              kind = "sparkle"
+            })
+          end
+        end
+      end
+
+      -- FADE: ghostly afterimage
+      if L.stage == 6 then
+        local fade = 1 - (L.stage_tick / (stage_info.duration or 32))
+        size_m = size_m * fade
       end
 
       -- draw body segments with legs, texture, and anatomy
@@ -2279,33 +2498,41 @@ function draw_lagartas()
           screen.fill()
         end
 
-        -- species label
+        -- species label + lifecycle stage
         screen.level(util.clamp(sp.bright_base, 1, 10))
         screen.font_size(6)
         screen.move(head.x + 5, head.y - 4)
         screen.text(sp.name)
+        -- stage name
+        screen.level(4)
+        screen.move(head.x + 5, head.y + 3)
+        screen.text(stage_info.name)
       end
+
+      ::skip_body_draw::
     end
   end
 
-  -- bottom bar: show which species are active, selected species highlighted
-  screen.font_size(6)
+  -- bottom bar: species + lifecycle stage
+  screen.font_size(5)
   for i, sp_key in ipairs(SPECIES_ORDER) do
     local sp = SPECIES[sp_key]
-    local is_active = lagartas[sp_key] ~= nil
+    local L = lagartas[sp_key]
     local is_sel = (i == cat_selected)
-    if is_active then
+    local x_pos = 1 + (i - 1) * 32
+    if L then
+      local st = LIFECYCLE[L.stage] or LIFECYCLE[1]
       screen.level(is_sel and 15 or 8)
+      screen.move(x_pos, 58)
+      screen.text(sp.name)
+      -- stage indicator
+      screen.level(is_sel and 10 or 5)
+      screen.move(x_pos, 63)
+      screen.text(st.name)
     else
       screen.level(is_sel and 6 or 2)
-    end
-    screen.move(1 + (i - 1) * 32, 63)
-    screen.text(sp.name)
-    if is_active then
-      -- small dot indicator
-      screen.level(sp.bright_base)
-      screen.circle(28 + (i - 1) * 32, 61, 1)
-      screen.fill()
+      screen.move(x_pos, 60)
+      screen.text(sp.name)
     end
   end
 
