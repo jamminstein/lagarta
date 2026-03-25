@@ -41,8 +41,8 @@ local PHASE_NAMES = {"DRIFT", "SURGE", "RUPTURE", "DISSOLVE"}
 local TAPE_BUF = 16
 
 local MOD_SRC_NAMES = {"q1","q2","q3","q4","q5","clk","gng","cha","r1","r2","r3","r4","tape"}
-local MOD_DST_NAMES = {"cross","fold","c.rate","c.pitch","c.dec","g.dec","t.rate","chaos"}
-local MOD_DST_PARAMS = {"q_cross","q_fold","click_rate","click_pitch","click_decay","gong_decay","tape_rate","chaos"}
+local MOD_DST_NAMES = {"cross","fold","c.rate","c.pitch","c.dec","g.dec","drift","chaos"}
+local MOD_DST_PARAMS = {"q_cross","q_fold","click_rate","click_pitch","click_decay","gong_decay","drift","chaos"}
 
 local scale_names = {}
 for i = 1, #musicutil.SCALES do
@@ -541,7 +541,7 @@ function apply_patchbay_modulation()
         local range = p.controlspec.maxval - p.controlspec.minval
         local modulated = util.clamp(base + mod_sum * range * 0.25,
           p.controlspec.minval, p.controlspec.maxval)
-        engine[pid](modulated)
+        pcall(function() engine[pid](modulated) end)
       end
     end
   end
