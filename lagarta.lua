@@ -32,8 +32,8 @@ local musicutil = require "musicutil"
 -- constants
 ------------------------------------------------------------
 
-local PAGES = {"QNTSSY", "CLICKR", "GONGS", "ROLZ", "TAPE", "LAGRTA", "MASTR"}
-local PAGE_FULL = {"QUANTUSSY", "CLICKER", "GONGS", "ROLZ", "TAPE", "LAGARTA", "MASTER"}
+local PAGES = {"QNTSSY", "CLICKR", "GONGS", "ROLZ", "TAPE", "LAGRTA", "MASTR", "HARMY"}
+local PAGE_FULL = {"QUANTUSSY", "CLICKER", "GONGS", "ROLZ", "TAPE", "LAGARTA", "MASTER", "HARMONY"}
 local DIV_NAMES = {"1", "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16"}
 local DIV_VALUES = {1, 1/2, 1/3, 1/4, 1/6, 1/8, 1/12, 1/16}
 local GRID_MODES = {"PATCHBAY", "KEYBOARD", "GESTURE"}
@@ -193,6 +193,48 @@ local gesture_length = 8
 
 -- midi
 local midi_out = nil
+
+-- harmony system
+local harmony_active = false
+local harmony_root = 48 -- C3 MIDI note
+local harmony_chord_idx = 1
+local harmony_prog_idx = 1
+local harmony_prog_tick = 0
+local harmony_bars_per_chord = 4
+local harmony_melody_pattern = 1  -- 1=arp up, 2=arp down, 3=arp updown, 4=scale run, 5=motif
+local harmony_melody_step = 1
+local harmony_melody_notes = {}
+local harmony_bass_step = 1
+local harmony_euclid_pattern = {}
+local harmony_euclid_step = 1
+local harmony_euclid_k = 5  -- hits
+local harmony_euclid_n = 16 -- steps
+
+-- chord and progression definitions
+local CHORD_TYPES = {
+  {name = "min7",  degrees = {0, 3, 7, 10, 14}},   -- root, m3, 5, m7, 9
+  {name = "maj7",  degrees = {0, 4, 7, 11, 14}},   -- root, M3, 5, M7, 9
+  {name = "dom7",  degrees = {0, 4, 7, 10, 14}},   -- root, M3, 5, m7, 9
+  {name = "min9",  degrees = {0, 3, 7, 10, 14}},
+  {name = "sus4",  degrees = {0, 5, 7, 12, 17}},
+  {name = "dim",   degrees = {0, 3, 6, 9, 12}},
+}
+local PROGRESSIONS = {
+  {name = "i-iv-v-i",    roots = {0, 5, 7, 0},      chords = {1,1,2,1}},
+  {name = "i-VI-III-VII", roots = {0, 8, 3, 10},     chords = {1,2,2,2}},
+  {name = "i-iv-VII-III", roots = {0, 5, 10, 3},     chords = {1,1,2,2}},
+  {name = "ii-V-I-vi",   roots = {2, 7, 0, 9},       chords = {1,3,2,1}},
+  {name = "I-vi-IV-V",   roots = {0, 9, 5, 7},       chords = {2,1,2,3}},
+  {name = "modal drift",  roots = {0, 2, 5, 7},      chords = {5,1,5,1}},
+}
+local MELODY_NAMES = {"ARP UP", "ARP DN", "ARP U/D", "SCALE", "MOTIF"}
+local BASS_PATTERNS = {
+  {name = "root",    pattern = {1, 1, 1, 1}},
+  {name = "root-5th", pattern = {1, 5, 1, 5}},
+  {name = "walking",  pattern = {1, 3, 5, 7}},
+  {name = "octave",   pattern = {1, 1, 8, 8}},
+}
+local harmony_bass_pattern = 1
 
 ------------------------------------------------------------
 -- init
@@ -373,6 +415,57 @@ function init()
   params:set_action("stereo_width", function(v) engine.stereo_width(v) end)
   params:set_action("amp", function(v) engine.amp(v) end)
 
+  -- HARMONY
+  local prog_names = {}
+  for _, p in ipairs(PROGRESSIONS) do table.insert(prog_names, p.name) end
+  local bass_names = {}
+  for _, b in ipairs(BASS_PATTERNS) do table.insert(bass_names, b.name) end
+  params:add_group("harmony", "HARMONY", 7)
+  params:add_option("harmony_active", "harmony", {"off", "on"}, 1)
+  params:add_number("harmony_root", "root note", 36, 72, 48)
+  params:add_option("harmony_prog", "progression", prog_names, 1)
+  params:add_option("harmony_melody", "melody pattern", MELODY_NAMES, 1)
+  params:add_option("harmony_bass", "bass pattern", bass_names, 1)
+  params:add_number("harmony_euclid_k", "euclidean hits", 1, 16, 5)
+  params:add_number("harmony_euclid_n", "euclidean steps", 2, 32, 16)
+  params:set_action("harmony_active", function(v)
+    harmony_active = (v == 2)
+    if harmony_active then
+      harmony_build_melody()
+      harmony_euclid_pattern = generate_euclidean(harmony_euclid_k, harmony_euclid_n)
+      harmony_euclid_step = 1
+      harmony_apply_to_quantussy()
+      harmony_apply_to_gongs()
+    end
+  end)
+  params:set_action("harmony_root", function(v)
+    harmony_root = v
+    if harmony_active then harmony_build_melody() end
+  end)
+  params:set_action("harmony_prog", function(v)
+    harmony_prog_idx = v
+    harmony_chord_idx = 1
+    harmony_prog_tick = 0
+    if harmony_active then harmony_build_melody() end
+  end)
+  params:set_action("harmony_melody", function(v)
+    harmony_melody_pattern = v
+    if harmony_active then harmony_build_melody() end
+  end)
+  params:set_action("harmony_bass", function(v)
+    harmony_bass_pattern = v
+  end)
+  params:set_action("harmony_euclid_k", function(v)
+    harmony_euclid_k = v
+    harmony_euclid_pattern = generate_euclidean(harmony_euclid_k, harmony_euclid_n)
+    harmony_euclid_step = 1
+  end)
+  params:set_action("harmony_euclid_n", function(v)
+    harmony_euclid_n = v
+    harmony_euclid_pattern = generate_euclidean(harmony_euclid_k, harmony_euclid_n)
+    harmony_euclid_step = 1
+  end)
+
   -- LAGARTAS (caterpillar bandmates)
   params:add_group("lagartas", "LAGARTAS", 5)
   params:add_option("cat_verde", "verde (melodic)", {"off", "on"}, 1)
@@ -415,6 +508,7 @@ function init()
   clock.run(grid_redraw_clock)
   clock.run(safe_click_clock)
   clock.run(safe_gesture_clock)
+  clock.run(harmony_clock)
 
   params:bang()
 end
@@ -533,8 +627,186 @@ function update_softcut()
 end
 
 ------------------------------------------------------------
+-- euclidean rhythm generator
+------------------------------------------------------------
+
+function generate_euclidean(k, n)
+  -- Bjorklund algorithm
+  local pattern = {}
+  for i = 1, n do pattern[i] = 0 end
+  if k >= n then
+    for i = 1, n do pattern[i] = 1 end
+    return pattern
+  end
+  if k == 0 then return pattern end
+
+  local groups = {}
+  for i = 1, k do groups[i] = {1} end
+  local remainders = {}
+  for i = 1, n - k do remainders[i] = {0} end
+
+  while #remainders > 1 do
+    local new_groups = {}
+    local min_len = math.min(#groups, #remainders)
+    for i = 1, min_len do
+      local g = {}
+      for _, v in ipairs(groups[i]) do table.insert(g, v) end
+      for _, v in ipairs(remainders[i]) do table.insert(g, v) end
+      table.insert(new_groups, g)
+    end
+    local new_remainders = {}
+    for i = min_len + 1, #groups do table.insert(new_remainders, groups[i]) end
+    for i = min_len + 1, #remainders do table.insert(new_remainders, remainders[i]) end
+    groups = new_groups
+    remainders = new_remainders
+  end
+
+  local idx = 1
+  for _, g in ipairs(groups) do
+    for _, v in ipairs(g) do pattern[idx] = v; idx = idx + 1 end
+  end
+  for _, g in ipairs(remainders) do
+    for _, v in ipairs(g) do pattern[idx] = v; idx = idx + 1 end
+  end
+  return pattern
+end
+
+------------------------------------------------------------
+-- harmony functions
+------------------------------------------------------------
+
+function harmony_get_chord_notes()
+  local prog = PROGRESSIONS[harmony_prog_idx]
+  local chord_type = CHORD_TYPES[prog.chords[harmony_chord_idx]]
+  local root = harmony_root + prog.roots[harmony_chord_idx]
+  local notes = {}
+  for _, deg in ipairs(chord_type.degrees) do
+    table.insert(notes, root + deg)
+  end
+  return notes, root
+end
+
+function harmony_build_melody()
+  local chord_notes = harmony_get_chord_notes()
+  local notes = {}
+  if harmony_melody_pattern == 1 then -- arp up
+    for oct = 0, 1 do
+      for _, n in ipairs(chord_notes) do table.insert(notes, n + oct * 12) end
+    end
+  elseif harmony_melody_pattern == 2 then -- arp down
+    for oct = 1, 0, -1 do
+      for i = #chord_notes, 1, -1 do table.insert(notes, chord_notes[i] + oct * 12) end
+    end
+  elseif harmony_melody_pattern == 3 then -- arp up/down
+    for _, n in ipairs(chord_notes) do table.insert(notes, n) end
+    for i = #chord_notes - 1, 2, -1 do table.insert(notes, chord_notes[i]) end
+  elseif harmony_melody_pattern == 4 then -- scale run from root
+    local root = chord_notes[1]
+    local sc = musicutil.generate_scale(root, "Dorian", 2)
+    for i = 1, math.min(#sc, 8) do table.insert(notes, sc[i]) end
+  elseif harmony_melody_pattern == 5 then -- motif (short repeating phrase)
+    local c = chord_notes
+    if #c >= 4 then
+      notes = {c[1], c[3], c[2], c[1], c[4], c[3], c[5] or c[1]+12, c[4]}
+    else
+      notes = {c[1], c[2], c[3], c[2]}
+    end
+  end
+  harmony_melody_notes = notes
+  harmony_melody_step = 1
+end
+
+function harmony_get_next_melody_note()
+  if #harmony_melody_notes == 0 then return 60 end
+  local note = harmony_melody_notes[harmony_melody_step]
+  harmony_melody_step = (harmony_melody_step % #harmony_melody_notes) + 1
+  return note
+end
+
+function harmony_get_bass_note()
+  local chord_notes = harmony_get_chord_notes()
+  local bp = BASS_PATTERNS[harmony_bass_pattern]
+  local deg = bp.pattern[harmony_bass_step]
+  harmony_bass_step = (harmony_bass_step % #bp.pattern) + 1
+  if deg <= #chord_notes then
+    return chord_notes[deg] - 12 -- one octave below
+  else
+    return chord_notes[1] - 12
+  end
+end
+
+function harmony_apply_to_quantussy()
+  local chord_notes = harmony_get_chord_notes()
+  for i = 1, math.min(5, #chord_notes) do
+    local freq = musicutil.note_num_to_freq(chord_notes[i] - 12) -- low register
+    set_safe("q_freq" .. i, util.clamp(freq, 20, 2000))
+  end
+end
+
+function harmony_apply_to_gongs()
+  local chord_notes = harmony_get_chord_notes()
+  local gong_octs = {1, 2, 3, 4}
+  for i = 1, 4 do
+    if i <= #chord_notes then
+      local freq = musicutil.note_num_to_freq(chord_notes[i] + (gong_octs[i] - 1) * 12)
+      set_safe("gong" .. i, util.clamp(freq, 50, 5000))
+    end
+  end
+end
+
+------------------------------------------------------------
 -- clocks
 ------------------------------------------------------------
+
+function harmony_clock()
+  while true do
+    clock.sleep(math.max(clock.get_beat_sec(), 0.05) / 4) -- 16th note resolution
+    if not harmony_active then goto harmony_continue end
+
+    harmony_prog_tick = harmony_prog_tick + 1
+
+    -- chord progression: advance every N bars
+    if harmony_prog_tick >= harmony_bars_per_chord * 16 then
+      harmony_prog_tick = 0
+      local prog = PROGRESSIONS[harmony_prog_idx]
+      harmony_chord_idx = (harmony_chord_idx % #prog.roots) + 1
+      -- retune everything to new chord
+      harmony_build_melody()
+      harmony_apply_to_quantussy()
+      harmony_apply_to_gongs()
+      -- bass root follows
+      local _, root = harmony_get_chord_notes()
+      set_safe("sub_freq", util.clamp(musicutil.note_num_to_freq(root - 24), 15, 200))
+      set_safe("bass_freq", util.clamp(musicutil.note_num_to_freq(root - 12), 20, 200))
+      harmony_bass_step = 1
+    end
+
+    -- euclidean rhythm: fire clicks on pattern hits
+    if #harmony_euclid_pattern > 0 then
+      harmony_euclid_step = (harmony_euclid_step % #harmony_euclid_pattern) + 1
+      if harmony_euclid_pattern[harmony_euclid_step] == 1 then
+        -- melody note
+        local note = harmony_get_next_melody_note()
+        local freq = musicutil.note_num_to_freq(note)
+        set_safe("click_pitch", freq)
+        engine.trig(1)
+        click_flash = 1
+        for i = 1, 4 do
+          gong_rings[i] = math.max(gong_rings[i], 0.5 + math.random() * 0.3)
+        end
+        -- bass on strong beats (every 4th euclidean hit)
+        if harmony_euclid_step % 4 == 1 then
+          local bass_note = harmony_get_bass_note()
+          set_safe("bass_click_pitch", musicutil.note_num_to_freq(math.max(bass_note, 20)))
+        end
+        -- MIDI out
+        send_midi_click()
+      end
+    end
+
+    ::harmony_continue::
+  end
+end
 
 function safe_click_clock()
   clock.sleep(1)
@@ -1586,7 +1858,7 @@ end
 
 function enc(n, d)
   if n == 1 then
-    page = util.clamp(page + d, 1, 7)
+    page = util.clamp(page + d, 1, 8)
 
   elseif page == 1 then -- QUANTUSSY
     if n == 2 then
@@ -1659,6 +1931,21 @@ function enc(n, d)
       if k3_held then params:delta("eq_hi_gain", d)    -- K3+E3: high EQ
       else params:delta("amp", d) end                   -- E3: master volume
     end
+
+  elseif page == 8 then -- HARMONY
+    if n == 2 then
+      if k3_held then
+        params:delta("harmony_euclid_k", d) -- K3+E2: euclidean hits
+      else
+        params:delta("harmony_prog", d)     -- E2: progression
+      end
+    elseif n == 3 then
+      if k3_held then
+        params:delta("harmony_euclid_n", d) -- K3+E3: euclidean steps
+      else
+        params:delta("harmony_melody", d)   -- E3: melody pattern
+      end
+    end
   end
 end
 
@@ -1713,6 +2000,10 @@ function key(n, z)
     elseif page == 7 then
       -- cycle mixer voice selection
       mix_selected = (mix_selected % 6) + 1
+    elseif page == 8 then
+      -- toggle harmony on/off
+      local cur = params:get("harmony_active")
+      params:set("harmony_active", cur == 1 and 2 or 1)
     end
 
   elseif n == 3 then
@@ -1740,10 +2031,10 @@ function redraw()
   screen.font_face(1)
   screen.font_size(8)
 
-  -- page tabs (6 compact tabs)
-  for i = 1, 7 do
+  -- page tabs (8 compact tabs)
+  for i = 1, 8 do
     screen.level(i == page and 15 or 3)
-    screen.move(1 + (i-1) * 18, 7)
+    screen.move(1 + (i-1) * 16, 7)
     screen.text(PAGES[i])
   end
   screen.level(1)
@@ -1757,7 +2048,8 @@ function redraw()
   elseif page == 4 then draw_rolz()
   elseif page == 5 then draw_tape()
   elseif page == 6 then draw_lagartas()
-  elseif page == 7 then draw_master() end
+  elseif page == 7 then draw_master()
+  elseif page == 8 then draw_harmony() end
 
   -- chaos burst sparks
   if chaos_burst > 0.05 then
@@ -2652,6 +2944,146 @@ function draw_master()
   screen.level(amp_val > 1 and 15 or 10)
   screen.rect(88, 55, math.floor(util.clamp(amp_val / 2, 0, 1) * 38), 4)
   screen.fill()
+end
+
+------------------------------------------------------------
+-- page 8: HARMONY
+------------------------------------------------------------
+
+function draw_harmony()
+  -- ON/OFF status
+  screen.font_size(8)
+  screen.level(harmony_active and 15 or 4)
+  screen.move(1, 18)
+  screen.text(harmony_active and "ON" or "OFF")
+
+  -- root note name
+  local note_names = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"}
+  local root_name = note_names[(harmony_root % 12) + 1]
+  local root_oct = math.floor(harmony_root / 12) - 1
+  screen.level(12)
+  screen.move(18, 18)
+  screen.text(root_name .. root_oct)
+
+  -- current chord name (root + type)
+  local prog = PROGRESSIONS[harmony_prog_idx]
+  local chord_type = CHORD_TYPES[prog.chords[harmony_chord_idx]]
+  local chord_root_midi = harmony_root + prog.roots[harmony_chord_idx]
+  local chord_root_name = note_names[(chord_root_midi % 12) + 1]
+  screen.level(15)
+  screen.font_size(10)
+  screen.move(40, 19)
+  screen.text(chord_root_name .. chord_type.name)
+
+  -- progression: 4 boxes showing chord positions
+  screen.font_size(6)
+  for i = 1, #prog.roots do
+    local bx = 1 + (i - 1) * 22
+    local by = 22
+    local bw = 20
+    local bh = 9
+    local is_current = (i == harmony_chord_idx)
+    -- box
+    screen.level(is_current and 15 or 3)
+    screen.rect(bx, by, bw, bh)
+    if is_current then screen.fill() else screen.stroke() end
+    -- label
+    local cr = harmony_root + prog.roots[i]
+    local cn = note_names[(cr % 12) + 1]
+    local ct = CHORD_TYPES[prog.chords[i]]
+    screen.level(is_current and 0 or 8)
+    screen.move(bx + 1, by + 7)
+    screen.text(cn .. string.sub(ct.name, 1, 3))
+  end
+
+  -- progression name
+  screen.level(6)
+  screen.font_size(6)
+  screen.move(92, 30)
+  screen.text(prog.name)
+
+  -- melody pattern name
+  screen.level(10)
+  screen.font_size(7)
+  screen.move(1, 42)
+  screen.text(MELODY_NAMES[harmony_melody_pattern])
+
+  -- piano-roll style melody visualization
+  if #harmony_melody_notes > 0 then
+    local min_n, max_n = 127, 0
+    for _, n in ipairs(harmony_melody_notes) do
+      if n < min_n then min_n = n end
+      if n > max_n then max_n = n end
+    end
+    local range = math.max(max_n - min_n, 1)
+    local roll_x = 42
+    local roll_w = 50
+    local roll_y = 34
+    local roll_h = 12
+    -- background
+    screen.level(1)
+    screen.rect(roll_x, roll_y, roll_w, roll_h)
+    screen.fill()
+    -- notes as dots
+    local step_w = roll_w / math.max(#harmony_melody_notes, 1)
+    for i, n in ipairs(harmony_melody_notes) do
+      local nx = roll_x + (i - 1) * step_w
+      local ny = roll_y + roll_h - ((n - min_n) / range) * roll_h
+      local is_step = (i == ((harmony_melody_step - 1) % #harmony_melody_notes) + 1)
+      screen.level(is_step and 15 or 6)
+      screen.rect(nx, ny, math.max(step_w - 1, 1), 2)
+      screen.fill()
+    end
+  end
+
+  -- euclidean pattern as circle
+  local ec_cx = 108
+  local ec_cy = 43
+  local ec_r = 9
+  if #harmony_euclid_pattern > 0 then
+    for i = 1, #harmony_euclid_pattern do
+      local angle = ((i - 1) / #harmony_euclid_pattern) * math.pi * 2 - math.pi / 2
+      local dx = math.cos(angle) * ec_r
+      local dy = math.sin(angle) * ec_r
+      local is_hit = harmony_euclid_pattern[i] == 1
+      local is_current = (i == harmony_euclid_step)
+      if is_current then
+        screen.level(15)
+        screen.circle(ec_cx + dx, ec_cy + dy, 2.5)
+        screen.fill()
+      elseif is_hit then
+        screen.level(10)
+        screen.circle(ec_cx + dx, ec_cy + dy, 1.5)
+        screen.fill()
+      else
+        screen.level(3)
+        screen.circle(ec_cx + dx, ec_cy + dy, 1)
+        screen.stroke()
+      end
+    end
+    -- euclidean label
+    screen.level(6)
+    screen.font_size(6)
+    screen.move(98, 56)
+    screen.text(harmony_euclid_k .. "/" .. harmony_euclid_n)
+  end
+
+  -- bass pattern name
+  screen.level(8)
+  screen.font_size(6)
+  screen.move(1, 52)
+  screen.text("bass:" .. BASS_PATTERNS[harmony_bass_pattern].name)
+
+  -- bars per chord
+  screen.level(4)
+  screen.move(1, 60)
+  screen.text("bars:" .. harmony_bars_per_chord)
+
+  -- controls hint
+  screen.level(3)
+  screen.font_size(6)
+  screen.move(42, 60)
+  screen.text("K2:on/off E2:prog E3:mel")
 end
 
 ------------------------------------------------------------
