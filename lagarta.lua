@@ -436,6 +436,18 @@ function init()
       harmony_euclid_step = 1
       harmony_apply_to_quantussy()
       harmony_apply_to_gongs()
+    else
+      -- restore default frequencies when turning off
+      local q_defaults = {36, 55, 82, 131, 196}
+      for i = 1, 5 do set_safe("q_freq" .. i, q_defaults[i]) end
+      local g_defaults = {80, 220, 580, 1200}
+      for i = 1, 4 do set_safe("gong" .. i, g_defaults[i]) end
+      set_safe("sub_freq", 36)
+      set_safe("bass_freq", 55)
+      -- stop euclidean triggers
+      harmony_euclid_pattern = {}
+      harmony_prog_tick = 0
+      harmony_chord_idx = 1
     end
   end)
   params:set_action("harmony_root", function(v)
@@ -457,13 +469,17 @@ function init()
   end)
   params:set_action("harmony_euclid_k", function(v)
     harmony_euclid_k = v
-    harmony_euclid_pattern = generate_euclidean(harmony_euclid_k, harmony_euclid_n)
-    harmony_euclid_step = 1
+    if harmony_active then
+      harmony_euclid_pattern = generate_euclidean(harmony_euclid_k, harmony_euclid_n)
+      harmony_euclid_step = 1
+    end
   end)
   params:set_action("harmony_euclid_n", function(v)
     harmony_euclid_n = v
-    harmony_euclid_pattern = generate_euclidean(harmony_euclid_k, harmony_euclid_n)
-    harmony_euclid_step = 1
+    if harmony_active then
+      harmony_euclid_pattern = generate_euclidean(harmony_euclid_k, harmony_euclid_n)
+      harmony_euclid_step = 1
+    end
   end)
 
   -- LAGARTAS (caterpillar bandmates)
