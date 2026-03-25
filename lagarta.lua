@@ -1344,59 +1344,51 @@ function enc(n, d)
   if n == 1 then
     page = util.clamp(page + d, 1, 6)
 
-  elseif k3_held and n == 3 then
-    -- K3+E3 = chaos on every page
-    params:delta("chaos", d)
-
   elseif page == 1 then -- QUANTUSSY
-    if k3_held then
-      if n == 2 then params:delta("q_bounds", d) end
-    else
-      if n == 2 then params:delta("q_cross", d)
-      elseif n == 3 then params:delta("q_fold", d) end
+    if n == 2 then params:delta("q_cross", d)
+    elseif n == 3 then
+      if k3_held then params:delta("q_bounds", d)    -- K3+E3: bounds
+      else params:delta("q_fold", d) end
     end
-    local pid = k3_held and (n == 2 and "q_bounds" or "q_mix") or (n == 2 and "q_cross" or "q_fold")
+    local pid = (n == 3 and k3_held) and "q_bounds" or (n == 2 and "q_cross" or "q_fold")
     record_gesture(pid, params:get(pid))
 
   elseif page == 2 then -- CLICKER
-    if k3_held then
-      if n == 2 then params:delta("click_rate", d) end
-    else
-      if n == 2 then params:delta("click_pitch", d)
-      elseif n == 3 then params:delta("click_ring", d) end
+    if n == 2 then params:delta("click_pitch", d)
+    elseif n == 3 then
+      if k3_held then params:delta("click_decay", d)  -- K3+E3: decay
+      else params:delta("click_ring", d) end
     end
-    local pid = k3_held and (n == 2 and "click_rate" or "click_decay") or (n == 2 and "click_pitch" or "click_ring")
+    local pid = (n == 3 and k3_held) and "click_decay" or (n == 2 and "click_pitch" or "click_ring")
     record_gesture(pid, params:get(pid))
 
   elseif page == 3 then -- GONGS
-    if k3_held then
-      if n == 2 then params:delta("gong1", d) end
-    else
-      if n == 2 then params:delta("gong_decay", d)
-      elseif n == 3 then params:delta("gong_amp", d) end
+    if n == 2 then params:delta("gong_decay", d)
+    elseif n == 3 then
+      if k3_held then params:delta("gong1", d)        -- K3+E3: tune gong 1
+      else params:delta("gong_amp", d) end
     end
 
   elseif page == 4 then -- ROLZ
-    if k3_held then
-      if n == 2 then params:delta("rolz_r1", d) end
-    else
-      if n == 2 then params:delta("rolz_cascade", d)
-      elseif n == 3 then params:delta("rolz_to_click", d) end
+    if n == 2 then params:delta("rolz_cascade", d)
+    elseif n == 3 then
+      if k3_held then params:delta("rolz_r1", d)      -- K3+E3: rolz 1 rate
+      else params:delta("rolz_to_click", d) end
     end
 
   elseif page == 5 then -- TAPE
-    if k3_held then
-      if n == 2 then params:delta("tape_feedback", d) end
-    else
-      if n == 2 then params:delta("tape_rate", d)
-      elseif n == 3 then params:delta("tape_slide", d) end
+    if n == 2 then params:delta("tape_rate", d)
+    elseif n == 3 then
+      if k3_held then params:delta("tape_feedback", d) -- K3+E3: feedback
+      else params:delta("tape_slide", d) end
     end
 
   elseif page == 6 then -- LAGARTA
     if n == 2 then
       cat_selected = util.clamp(cat_selected + d, 1, #SPECIES_ORDER)
     elseif n == 3 then
-      params:delta("cat_aggression", d)
+      if k3_held then params:delta("chaos", d)         -- K3+E3: chaos
+      else params:delta("cat_aggression", d) end
     end
   end
 end
