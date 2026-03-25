@@ -237,6 +237,20 @@ local BASS_PATTERNS = {
 local harmony_bass_pattern = 1
 
 ------------------------------------------------------------
+-- helpers (must be before init for params:bang)
+------------------------------------------------------------
+
+local function nudge(name, amount, lo, hi)
+  pcall(function()
+    params:set(name, util.clamp(params:get(name) + amount, lo, hi))
+  end)
+end
+
+local function set_safe(name, val)
+  pcall(function() params:set(name, val) end)
+end
+
+------------------------------------------------------------
 -- init
 ------------------------------------------------------------
 
@@ -969,16 +983,6 @@ end
 ------------------------------------------------------------
 -- lagarta bandmates (multi-personality musical system)
 ------------------------------------------------------------
-
-local function nudge(name, amount, lo, hi)
-  pcall(function()
-    params:set(name, util.clamp(params:get(name) + amount, lo, hi))
-  end)
-end
-
-local function set_safe(name, val)
-  pcall(function() params:set(name, val) end)
-end
 
 local function harmonic_freq(root_freq, intervals)
   local ratio = intervals[math.random(1, #intervals)]
