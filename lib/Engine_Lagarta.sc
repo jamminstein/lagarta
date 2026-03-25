@@ -23,27 +23,27 @@ Engine_Lagarta : CroneEngine {
       arg out=0, amp=0.5,
         // quantussy ring
         q_freq1=36, q_freq2=55, q_freq3=82, q_freq4=131, q_freq5=196,
-        q_bounds=0.5, q_cross=0.3, q_mix=0.5, q_fold=0.5,
+        q_bounds=0.5, q_cross=0.3, q_mix=0.25, q_fold=0.5,
         // sub bass
-        sub_freq=36, sub_level=0.4, sub_width=0.3,
+        sub_freq=36, sub_level=0.15, sub_width=0.3,
         // rolz (Plumbutter-style chaotic rhythm)
         rolz_r1=1.0, rolz_r2=2.3, rolz_r3=4.7, rolz_r4=0.6,
-        rolz_cascade=0.5, rolz_to_click=0,
+        rolz_cascade=0.5, rolz_to_click=0.3,
         // bass body (low resonator excited by rolz/clicks)
-        bass_freq=55, bass_decay=0.25, bass_level=0.4,
+        bass_freq=55, bass_decay=0.25, bass_level=0.2,
         // bass clicker (low-frequency melodic clicks)
         bass_click_pitch=80, bass_click_decay=0.08, bass_click_amp=0.4,
         // clicker
-        click_rate=3, click_decay=0.03, click_pitch=200,
-        click_ring=0.5, click_amp=0.5, click_free=1,
+        click_rate=4, click_decay=0.06, click_pitch=300,
+        click_ring=0.4, click_amp=0.7, click_free=1,
         t_click=0,
         // gongs (now spanning low to high)
         gong1=80, gong2=220, gong3=580, gong4=1200,
-        gong_decay=2.0, gong_amp=0.4,
+        gong_decay=2.0, gong_amp=0.5,
         // audio input
         input_gain=0, input_fold=0, input_to_gong=0, input_mix=0,
         // warmth filter
-        lpf_freq=6000, lpf_res=0.1,
+        lpf_freq=3500, lpf_res=0.1,
         // global
         chaos=0.3, drift=0.1;
 
