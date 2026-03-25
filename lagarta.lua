@@ -1342,18 +1342,15 @@ end
 
 function enc(n, d)
   if n == 1 then
-    -- E1: page select normally. Hold K3 + E1 = chaos
-    if k3_held then
-      params:delta("chaos", d)
-    else
-      page = util.clamp(page + d, 1, 6)
-    end
+    page = util.clamp(page + d, 1, 6)
+
+  elseif k3_held and n == 3 then
+    -- K3+E3 = chaos on every page
+    params:delta("chaos", d)
 
   elseif page == 1 then -- QUANTUSSY
-    -- K3 held = alt layer
     if k3_held then
-      if n == 2 then params:delta("q_bounds", d)
-      elseif n == 3 then params:delta("q_mix", d) end
+      if n == 2 then params:delta("q_bounds", d) end
     else
       if n == 2 then params:delta("q_cross", d)
       elseif n == 3 then params:delta("q_fold", d) end
@@ -1363,8 +1360,7 @@ function enc(n, d)
 
   elseif page == 2 then -- CLICKER
     if k3_held then
-      if n == 2 then params:delta("click_rate", d)
-      elseif n == 3 then params:delta("click_decay", d) end
+      if n == 2 then params:delta("click_rate", d) end
     else
       if n == 2 then params:delta("click_pitch", d)
       elseif n == 3 then params:delta("click_ring", d) end
@@ -1374,9 +1370,7 @@ function enc(n, d)
 
   elseif page == 3 then -- GONGS
     if k3_held then
-      -- shift: tune individual gongs
-      if n == 2 then params:delta("gong1", d)
-      elseif n == 3 then params:delta("gong2", d) end
+      if n == 2 then params:delta("gong1", d) end
     else
       if n == 2 then params:delta("gong_decay", d)
       elseif n == 3 then params:delta("gong_amp", d) end
@@ -1384,9 +1378,7 @@ function enc(n, d)
 
   elseif page == 4 then -- ROLZ
     if k3_held then
-      -- shift: individual rolz rates
-      if n == 2 then params:delta("rolz_r1", d)
-      elseif n == 3 then params:delta("rolz_r2", d) end
+      if n == 2 then params:delta("rolz_r1", d) end
     else
       if n == 2 then params:delta("rolz_cascade", d)
       elseif n == 3 then params:delta("rolz_to_click", d) end
@@ -1394,8 +1386,7 @@ function enc(n, d)
 
   elseif page == 5 then -- TAPE
     if k3_held then
-      if n == 2 then params:delta("tape_feedback", d)
-      elseif n == 3 then params:delta("tape_gene", d) end
+      if n == 2 then params:delta("tape_feedback", d) end
     else
       if n == 2 then params:delta("tape_rate", d)
       elseif n == 3 then params:delta("tape_slide", d) end
