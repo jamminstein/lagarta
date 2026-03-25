@@ -104,12 +104,12 @@ Engine_Lagarta : CroneEngine {
 
       // ---- SUB BASS ----
       // dedicated sub oscillator — Lua updates sub_freq with scale notes
-      // not a static drone: responds to triggers with pitch envelope
       // sine + pulse hybrid for thickness
+      // uses Dust for rhythmic breathing (independent of clicker trig)
 
       sub = SinOsc.ar(
         sub_freq + (LFNoise2.kr(0.07) * drift * 2)
-          + (EnvGen.kr(Env.perc(0.001, 0.1), trig) * sub_freq * 0.05), // pitch kick on triggers
+          + (EnvGen.kr(Env.perc(0.001, 0.1), Dust.kr(click_rate.max(1))) * sub_freq * 0.05),
         0,
         sub_level * 0.6
       );
@@ -120,8 +120,8 @@ Engine_Lagarta : CroneEngine {
           sub_width + (LFNoise1.kr(0.2) * 0.1)
         ) * sub_level * 0.25
       );
-      // slight amplitude pulse from triggers — sub breathes with the rhythm
-      sub = sub * (1 + (EnvGen.kr(Env.perc(0.001, 0.3), trig) * 0.3));
+      // slight amplitude pulse — sub breathes with the rhythm
+      sub = sub * (1 + (EnvGen.kr(Env.perc(0.001, 0.3), Dust.kr(click_rate.max(1))) * 0.3));
       sub = LPF.ar(sub, (sub_freq * 4).min(400));
 
       // ---- ROLZ ----
@@ -226,11 +226,10 @@ Engine_Lagarta : CroneEngine {
       sig = sig.tanh; // soft saturation (adds warmth + harmonics)
       sig = sig * amp;
 
-      // gentle stereo drift (sub stays centered)
-      Out.ar(out, [
-        sig + Pan2.ar(sub * 0.3, 0).at(0),
-        sig + Pan2.ar(sub * 0.3, 0).at(1)
-      ] * Pan2.ar(1, LFNoise2.kr(0.1 + (chaos * 0.5)).range(-0.25, 0.25)));
+      // stereo: sub centered, rest gently panned
+      sig = Pan2.ar(sig, LFNoise2.kr(0.1 + (chaos * 0.5)).range(-0.25, 0.25));
+      sig = sig + (sub ! 2); // sub stays mono/centered
+      Out.ar(out, sig);
     }).add;
 
     context.server.sync;
