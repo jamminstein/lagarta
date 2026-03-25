@@ -1794,146 +1794,294 @@ function draw_lagartas()
         end
       end
 
-      -- draw body segments (species-specific shapes)
+      -- draw body segments with legs, texture, and anatomy
+      local agg = 0.5
+      pcall(function() agg = params:get("cat_aggression") end)
+
       for i = sp.seg_count, 1, -1 do
         local seg = L.segments[i]
-        if seg then
-          -- per-segment brightness
-          local param_intensity = 0
-          if i <= 5 then
-            param_intensity = math.abs(math.sin(q_phase[i] or 0))
-          elseif i == 6 then
-            param_intensity = click_flash
-          elseif i == 7 then
-            param_intensity = math.max(gong_rings[1] or 0, gong_rings[2] or 0)
-          elseif i <= 10 then
-            param_intensity = rolz_flash[i - 7] or 0
-          end
+        if not seg then goto continue_seg end
+        local prev_seg = L.segments[i-1]
+        local next_seg = L.segments[i+1]
 
-          local bri = util.clamp(math.floor(sp.bright_base + param_intensity * 5
-            + math.sin(frame * 0.1 + i * 0.5) * 1.5), 1, 15)
+        local param_intensity = 0
+        if i <= 5 then param_intensity = math.abs(math.sin(q_phase[i] or 0))
+        elseif i == 6 then param_intensity = click_flash
+        elseif i == 7 then param_intensity = math.max(gong_rings[1] or 0, gong_rings[2] or 0)
+        elseif i <= 10 then param_intensity = rolz_flash[i - 7] or 0 end
 
-          if sp_key == "verde" then
-            -- round smooth segments (circles), gentle sine-wave undulation
-            screen.level(bri)
-            local r = i == 1 and 3.0 or (2.2 - i * 0.06)
-            local uy = seg.y + math.sin(frame * 0.06 + i * 0.5) * 1.5
-            screen.circle(seg.x, uy, math.max(r, 0.8))
-            screen.fill()
+        local bri = util.clamp(math.floor(sp.bright_base + param_intensity * 5
+          + math.sin(frame * 0.1 + i * 0.5) * 1.5 + agg * 3), 1, 15)
 
-          elseif sp_key == "venenosa" then
-            -- angular/spiky segments (diamonds)
-            screen.level(bri)
-            local r = i == 1 and 3.0 or (2.0 - i * 0.05)
-            r = math.max(r, 0.6)
-            local uy = seg.y + (math.random() - 0.5) * 1.5  -- jagged
-            -- diamond shape
-            screen.move(seg.x, uy - r)
-            screen.line(seg.x + r, uy)
-            screen.line(seg.x, uy + r)
-            screen.line(seg.x - r, uy)
-            screen.close()
-            screen.fill()
-
-          elseif sp_key == "seda" then
-            -- tiny ethereal segments (small dots)
-            screen.level(util.clamp(bri, 1, 6))
-            local r = i == 1 and 1.5 or 0.8
-            local uy = seg.y + math.sin(frame * 0.04 + i * 0.6) * 2.0
-            screen.circle(seg.x, uy, r)
-            screen.fill()
-
-          elseif sp_key == "fogo" then
-            -- pulsing segments that flash with rhythm
-            local pulse = click_flash * 3 + (rolz_flash[1] or 0) * 2
-            local final_bri = util.clamp(math.floor(bri + pulse * 3), 1, 15)
-            screen.level(final_bri)
-            local r = i == 1 and 2.8 or (2.0 - i * 0.07)
-            r = math.max(r, 0.6)
-            local bounce = math.abs(math.sin(frame * 0.1 + i * 0.4)) * 2.0
-            local uy = seg.y - bounce
-            screen.circle(seg.x, uy, r)
-            screen.fill()
-          end
+        -- body direction for leg angle
+        local body_angle = 0
+        if prev_seg then
+          body_angle = math.atan2(prev_seg.y - seg.y, prev_seg.x - seg.x)
         end
-      end
-
-      -- draw antennae (species-specific)
-      local head = L.segments[1]
-      if head then
-        local ant_len = 4 + math.sin(frame * 0.12) * 1.5
+        local perp = body_angle + math.pi / 2
 
         if sp_key == "verde" then
-          -- soft antennae with round tips
-          screen.level(7)
-          local lax = head.x - ant_len * 0.6 + math.sin(frame * 0.1) * 1.5
-          local lay = head.y - 2 - ant_len + math.cos(frame * 0.13) * 1
-          local rax = head.x + ant_len * 0.6 + math.cos(frame * 0.09) * 1.5
-          local ray = head.y - 2 - ant_len + math.sin(frame * 0.11) * 1
-          screen.move(head.x, head.y - 2)
-          screen.line(lax, lay)
-          screen.stroke()
-          screen.move(head.x, head.y - 2)
-          screen.line(rax, ray)
-          screen.stroke()
-          screen.circle(lax, lay, 1)
+          -- lush round body with visible segment ridges
+          local uy = seg.y + math.sin(frame * 0.06 + i * 0.5) * 1.5
+          local r = i == 1 and 3.5 or (2.8 - i * 0.12)
+          r = math.max(r, 1.0)
+          -- body fill
+          screen.level(bri)
+          screen.circle(seg.x, uy, r)
           screen.fill()
-          screen.circle(rax, ray, 1)
-          screen.fill()
+          -- segment ridge highlight (brighter top arc)
+          screen.level(util.clamp(bri + 3, 1, 15))
+          screen.arc(seg.x, uy, r * 0.8, math.pi * 1.1, math.pi * 1.9)
+          screen.stroke()
+          -- tiny legs on non-head segments (alternating phase)
+          if i > 1 and i < sp.seg_count then
+            screen.level(util.clamp(bri - 2, 1, 10))
+            local leg_phase = math.sin(frame * 0.08 + i * 0.6) * 1.5
+            -- left leg
+            screen.move(seg.x + math.cos(perp) * r * 0.6, uy + math.sin(perp) * r * 0.6)
+            screen.line(seg.x + math.cos(perp) * (r + 2.5), uy + math.sin(perp) * (r + 2.5) + leg_phase)
+            screen.stroke()
+            -- right leg
+            screen.move(seg.x - math.cos(perp) * r * 0.6, uy - math.sin(perp) * r * 0.6)
+            screen.line(seg.x - math.cos(perp) * (r + 2.5), uy - math.sin(perp) * (r + 2.5) - leg_phase)
+            screen.stroke()
+          end
 
         elseif sp_key == "venenosa" then
-          -- sharp pointed antennae
-          screen.level(12)
-          local lax = head.x - ant_len * 0.8
-          local lay = head.y - 3 - ant_len * 1.2
-          local rax = head.x + ant_len * 0.8
-          local ray = head.y - 3 - ant_len * 1.2
+          -- spiky armored segments with thorns
+          local uy = seg.y + (math.random() - 0.5) * 1.2
+          local r = i == 1 and 3.2 or (2.5 - i * 0.08)
+          r = math.max(r, 0.8)
+          -- diamond body
+          screen.level(bri)
+          screen.move(seg.x, uy - r)
+          screen.line(seg.x + r * 1.2, uy)
+          screen.line(seg.x, uy + r)
+          screen.line(seg.x - r * 1.2, uy)
+          screen.close()
+          screen.fill()
+          -- dorsal spines
+          if i > 1 then
+            screen.level(util.clamp(bri + 2, 1, 15))
+            local spine_h = r * 0.8 + math.random() * 1.5
+            screen.move(seg.x, uy - r)
+            screen.line(seg.x + (math.random() - 0.5) * 1.5, uy - r - spine_h)
+            screen.stroke()
+          end
+          -- jagged legs
+          if i > 1 and i < sp.seg_count then
+            screen.level(util.clamp(bri - 1, 1, 12))
+            local jag = (math.random() - 0.5) * 2
+            screen.move(seg.x + r * 0.8, uy + r * 0.3)
+            screen.line(seg.x + r + 2.5 + jag, uy + r + 1.5)
+            screen.stroke()
+            screen.move(seg.x - r * 0.8, uy + r * 0.3)
+            screen.line(seg.x - r - 2.5 - jag, uy + r + 1.5)
+            screen.stroke()
+          end
+
+        elseif sp_key == "seda" then
+          -- ethereal translucent body with glowing core
+          local uy = seg.y + math.sin(frame * 0.04 + i * 0.6) * 2.5
+          local r = i == 1 and 2.0 or (1.5 - i * 0.04)
+          r = math.max(r, 0.5)
+          -- outer glow (dim)
+          screen.level(util.clamp(math.floor(bri * 0.4), 1, 4))
+          screen.circle(seg.x, uy, r + 1.5)
+          screen.stroke()
+          -- inner core (brighter)
+          screen.level(util.clamp(bri, 1, 7))
+          screen.circle(seg.x, uy, r)
+          screen.fill()
+          -- connecting thread between segments
+          if next_seg then
+            local nuy = next_seg.y + math.sin(frame * 0.04 + (i+1) * 0.6) * 2.5
+            screen.level(util.clamp(math.floor(bri * 0.3), 1, 3))
+            screen.move(seg.x, uy)
+            screen.line(next_seg.x, nuy)
+            screen.stroke()
+          end
+
+        elseif sp_key == "fogo" then
+          -- pulsing ember segments, size breathes with rhythm
+          local pulse = click_flash * 3 + (rolz_flash[1] or 0) * 2
+          local final_bri = util.clamp(math.floor(bri + pulse * 3), 1, 15)
+          local r = i == 1 and 3.0 or (2.2 - i * 0.1)
+          r = math.max(r, 0.7)
+          -- size pulses with rhythm
+          r = r + pulse * 0.8
+          local bounce = math.abs(math.sin(frame * 0.12 + i * 0.4)) * 2.0
+          local uy = seg.y - bounce
+          -- hot core
+          screen.level(final_bri)
+          screen.circle(seg.x, uy, r)
+          screen.fill()
+          -- outer heat ring
+          screen.level(util.clamp(math.floor(final_bri * 0.5), 1, 8))
+          screen.circle(seg.x, uy, r + 1)
+          screen.stroke()
+          -- legs that kick with rhythm
+          if i > 1 and i < sp.seg_count then
+            screen.level(util.clamp(final_bri - 2, 1, 12))
+            local kick = math.sin(frame * 0.15 + i) * 2
+            screen.move(seg.x + r * 0.5, uy + r * 0.5)
+            screen.line(seg.x + r + 2 + kick, uy + r + 2)
+            screen.stroke()
+            screen.move(seg.x - r * 0.5, uy + r * 0.5)
+            screen.line(seg.x - r - 2 - kick, uy + r + 2)
+            screen.stroke()
+          end
+        end
+        ::continue_seg::
+      end
+
+      -- draw head details: antennae, mandibles, eyes
+      local head = L.segments[1]
+      if head then
+        local ant_len = 5 + math.sin(frame * 0.12) * 2
+
+        if sp_key == "verde" then
+          -- graceful curved antennae with bulb tips
+          screen.level(8)
+          local la_x = head.x - ant_len * 0.7 + math.sin(frame * 0.1) * 2
+          local la_y = head.y - 3 - ant_len + math.cos(frame * 0.13) * 1.5
+          local ra_x = head.x + ant_len * 0.7 + math.cos(frame * 0.09) * 2
+          local ra_y = head.y - 3 - ant_len + math.sin(frame * 0.11) * 1.5
+          -- curved antennae via control point
+          screen.move(head.x - 1, head.y - 3)
+          screen.curve(head.x - 3, head.y - 4 - ant_len * 0.5,
+                       la_x + 1, la_y + 2, la_x, la_y)
+          screen.stroke()
+          screen.move(head.x + 1, head.y - 3)
+          screen.curve(head.x + 3, head.y - 4 - ant_len * 0.5,
+                       ra_x - 1, ra_y + 2, ra_x, ra_y)
+          screen.stroke()
+          -- bulb tips
+          screen.level(10)
+          screen.circle(la_x, la_y, 1.2)
+          screen.fill()
+          screen.circle(ra_x, ra_y, 1.2)
+          screen.fill()
+          -- small mandibles
+          screen.level(5)
+          screen.move(head.x - 1.5, head.y + 2)
+          screen.line(head.x - 2.5, head.y + 3.5)
+          screen.stroke()
+          screen.move(head.x + 1.5, head.y + 2)
+          screen.line(head.x + 2.5, head.y + 3.5)
+          screen.stroke()
+
+        elseif sp_key == "venenosa" then
+          -- long sharp antennae, fangs
+          screen.level(13)
+          local spread = ant_len * 0.9
+          local la_x = head.x - spread
+          local la_y = head.y - 3 - ant_len * 1.3
+          local ra_x = head.x + spread
+          local ra_y = head.y - 3 - ant_len * 1.3
           screen.move(head.x - 1, head.y - 2)
-          screen.line(lax, lay)
+          screen.line(la_x, la_y)
           screen.stroke()
           screen.move(head.x + 1, head.y - 2)
-          screen.line(rax, ray)
+          screen.line(ra_x, ra_y)
+          screen.stroke()
+          -- fangs / mandibles
+          screen.level(15)
+          screen.move(head.x - 1, head.y + 1.5)
+          screen.line(head.x - 3, head.y + 5)
+          screen.line(head.x - 0.5, head.y + 3)
+          screen.stroke()
+          screen.move(head.x + 1, head.y + 1.5)
+          screen.line(head.x + 3, head.y + 5)
+          screen.line(head.x + 0.5, head.y + 3)
           screen.stroke()
 
         elseif sp_key == "seda" then
-          -- barely visible thin antennae
+          -- gossamer thread antennae, barely there
           screen.level(3)
+          local sway = math.sin(frame * 0.03) * 3
           screen.move(head.x, head.y - 1)
-          screen.line(head.x - 2 + math.sin(frame * 0.05) * 1, head.y - 3 - ant_len * 0.6)
+          screen.line(head.x - 3 + sway, head.y - 2 - ant_len * 0.8)
           screen.stroke()
           screen.move(head.x, head.y - 1)
-          screen.line(head.x + 2 + math.cos(frame * 0.04) * 1, head.y - 3 - ant_len * 0.6)
+          screen.line(head.x + 3 - sway, head.y - 2 - ant_len * 0.8)
           screen.stroke()
+          -- tiny glowing tips
+          screen.level(5)
+          screen.pixel(math.floor(head.x - 3 + sway), math.floor(head.y - 2 - ant_len * 0.8))
+          screen.fill()
+          screen.pixel(math.floor(head.x + 3 - sway), math.floor(head.y - 2 - ant_len * 0.8))
+          screen.fill()
 
         elseif sp_key == "fogo" then
-          -- fiery antennae
-          screen.level(12)
-          local pulse = math.sin(frame * 0.15) * 2
-          screen.move(head.x, head.y - 2)
-          screen.line(head.x - ant_len * 0.5 + pulse, head.y - 3 - ant_len)
+          -- flame antennae that flicker
+          screen.level(13)
+          local flicker_l = math.sin(frame * 0.2) * 2 + math.random() * 1
+          local flicker_r = math.cos(frame * 0.18) * 2 + math.random() * 1
+          screen.move(head.x - 1, head.y - 2)
+          screen.line(head.x - ant_len * 0.5 + flicker_l, head.y - 3 - ant_len)
           screen.stroke()
-          screen.move(head.x, head.y - 2)
-          screen.line(head.x + ant_len * 0.5 - pulse, head.y - 3 - ant_len)
+          screen.move(head.x + 1, head.y - 2)
+          screen.line(head.x + ant_len * 0.5 + flicker_r, head.y - 3 - ant_len)
           screen.stroke()
-          -- sparks around head
-          if math.random() < 0.5 then
-            screen.level(util.clamp(math.floor(10 + math.random() * 5), 1, 15))
-            screen.pixel(head.x + math.random(-3, 3), head.y + math.random(-4, 1))
-            screen.fill()
-          end
+          -- flame tips
+          screen.level(15)
+          screen.circle(head.x - ant_len * 0.5 + flicker_l, head.y - 3 - ant_len, 0.8)
+          screen.fill()
+          screen.circle(head.x + ant_len * 0.5 + flicker_r, head.y - 3 - ant_len, 0.8)
+          screen.fill()
+          -- ember mandibles
+          screen.level(10)
+          screen.move(head.x - 1, head.y + 2)
+          screen.line(head.x - 2, head.y + 4)
+          screen.stroke()
+          screen.move(head.x + 1, head.y + 2)
+          screen.line(head.x + 2, head.y + 4)
+          screen.stroke()
         end
 
-        -- eyes
-        screen.level(15)
-        screen.circle(head.x - 1.2, head.y - 0.5, 0.6)
-        screen.fill()
-        screen.circle(head.x + 1.2, head.y - 0.5, 0.6)
-        screen.fill()
+        -- eyes (species-specific)
+        if sp_key == "venenosa" then
+          -- angry red eyes (bright, larger)
+          screen.level(15)
+          screen.circle(head.x - 1.5, head.y - 0.5, 0.9)
+          screen.fill()
+          screen.circle(head.x + 1.5, head.y - 0.5, 0.9)
+          screen.fill()
+        elseif sp_key == "seda" then
+          -- dim gentle eyes
+          screen.level(5)
+          screen.circle(head.x - 1, head.y, 0.5)
+          screen.fill()
+          screen.circle(head.x + 1, head.y, 0.5)
+          screen.fill()
+        elseif sp_key == "fogo" then
+          -- glowing ember eyes
+          local eye_bri = util.clamp(math.floor(10 + click_flash * 5), 1, 15)
+          screen.level(eye_bri)
+          screen.circle(head.x - 1.5, head.y - 0.3, 0.7)
+          screen.fill()
+          screen.circle(head.x + 1.5, head.y - 0.3, 0.7)
+          screen.fill()
+        else
+          -- verde: friendly round eyes
+          screen.level(12)
+          screen.circle(head.x - 1.5, head.y - 0.5, 0.8)
+          screen.fill()
+          screen.circle(head.x + 1.5, head.y - 0.5, 0.8)
+          screen.fill()
+          -- pupils
+          screen.level(0)
+          screen.circle(head.x - 1.5, head.y - 0.3, 0.3)
+          screen.fill()
+          screen.circle(head.x + 1.5, head.y - 0.3, 0.3)
+          screen.fill()
+        end
 
-        -- species name label next to head
+        -- species label
         screen.level(util.clamp(sp.bright_base, 1, 10))
         screen.font_size(6)
-        screen.move(head.x + 5, head.y - 3)
+        screen.move(head.x + 5, head.y - 4)
         screen.text(sp.name)
       end
     end
