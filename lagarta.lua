@@ -79,21 +79,84 @@ local scale_notes = {}
 local note_index = 1
 local held_notes = {}
 
--- caterpillar (the living explorer)
-local cat_active = false
-local cat_clock_id = nil
-local cat_phase = 1
-local cat_tick = 0
-local cat_pl = {8, 6, 4, 8}
-local cat_anchors = {}
-local cat_x = 64
-local cat_y = 38
-local cat_dx = 0.3
-local cat_dy = 0
-local cat_segments = {}
-local cat_speed = 0.3
-local cat_aggression = 0.5
-local NUM_SEGMENTS = 10
+-- musical constants
+local INTERVALS = {
+  unison = 1, octave = 2, fifth = 1.5, fourth = 4/3,
+  maj3 = 5/4, min3 = 6/5, min7 = 9/5, tritone = 1.414
+}
+local CONSONANT = {1, 2, 1.5, 4/3, 5/4, 3/2}
+local DISSONANT = {1.414, 1.067, 1.122, 1.782, 2.378}
+local POLY_RATIOS = {3/2, 4/3, 5/4, 5/3, 7/4, 2/3, 3/4}
+
+-- caterpillar species definitions
+local SPECIES = {
+  verde = {
+    name = "VERDE",
+    desc = "melodic friend",
+    intervals = CONSONANT,
+    seg_count = 8,
+    speed = 0.25,
+    bright_base = 6,
+    prefer_scales = {"Major", "Dorian", "Pentatonic Major"},
+    click_decay_range = {0.04, 0.15},
+    fold_range = {0.1, 0.4},
+    chaos_range = {0.05, 0.25},
+    gong_decay_range = {2.0, 6.0},
+    sub_love = 0.3,
+    rhythm_style = "steady",
+  },
+  venenosa = {
+    name = "VENENOSA",
+    desc = "venomous chaos",
+    intervals = DISSONANT,
+    seg_count = 10,
+    speed = 0.8,
+    bright_base = 9,
+    prefer_scales = {"Chromatic", "Whole Tone", "Hungarian Minor"},
+    click_decay_range = {0.002, 0.04},
+    fold_range = {0.5, 1.0},
+    chaos_range = {0.3, 0.8},
+    gong_decay_range = {0.3, 1.2},
+    sub_love = 0.1,
+    rhythm_style = "erratic",
+  },
+  seda = {
+    name = "SEDA",
+    desc = "silk ambient",
+    intervals = {1, 2, 1.5, 4/3},
+    seg_count = 12,
+    speed = 0.1,
+    bright_base = 3,
+    prefer_scales = {"Pentatonic Minor", "Mixolydian", "Dorian"},
+    click_decay_range = {0.1, 0.5},
+    fold_range = {0.05, 0.2},
+    chaos_range = {0.02, 0.12},
+    gong_decay_range = {4.0, 10.0},
+    sub_love = 0.6,
+    rhythm_style = "sparse",
+  },
+  fogo = {
+    name = "FOGO",
+    desc = "fire rhythm",
+    intervals = {1, 1.5, 2, 4/3, 5/4},
+    seg_count = 7,
+    speed = 1.0,
+    bright_base = 10,
+    prefer_scales = {"Minor Pentatonic", "Blues", "Phrygian"},
+    click_decay_range = {0.01, 0.06},
+    fold_range = {0.3, 0.7},
+    chaos_range = {0.15, 0.45},
+    gong_decay_range = {0.5, 2.0},
+    sub_love = 0.5,
+    rhythm_style = "polyrhythm",
+  },
+}
+local SPECIES_ORDER = {"verde", "venenosa", "seda", "fogo"}
+
+-- caterpillar instances (up to 4 active)
+local lagartas = {}
+local active_species = {}
+local cat_selected = 1
 
 -- grid
 local g = nil
@@ -119,11 +182,6 @@ local midi_out = nil
 ------------------------------------------------------------
 
 function init()
-  -- init caterpillar segments
-  for i = 1, NUM_SEGMENTS do
-    cat_segments[i] = {x = 64 - (i-1) * 4, y = 38}
-  end
-
   -- init patchbay
   for s = 1, #MOD_SRC_NAMES do
     patch[s] = {}
@@ -266,16 +324,18 @@ function init()
   params:set_action("lpf_freq", function(v) engine.lpf_freq(v) end)
   params:set_action("lpf_res", function(v) engine.lpf_res(v) end)
 
-  -- CATERPILLAR
-  params:add_group("caterpillar", "CATERPILLAR", 6)
-  params:add_option("cat_active", "caterpillar", {"off", "on"}, 1)
+  -- LAGARTAS (caterpillar bandmates)
+  params:add_group("lagartas", "LAGARTAS", 5)
+  params:add_option("cat_verde", "verde (melodic)", {"off", "on"}, 1)
+  params:add_option("cat_venenosa", "venenosa (chaos)", {"off", "on"}, 1)
+  params:add_option("cat_seda", "seda (ambient)", {"off", "on"}, 1)
+  params:add_option("cat_fogo", "fogo (rhythm)", {"off", "on"}, 1)
   params:add_control("cat_aggression", "aggression", controlspec.new(0.1, 1, 'lin', 0, 0.5))
-  params:add_number("cat_drift_bars", "drift bars", 2, 16, 8)
-  params:add_number("cat_surge_bars", "surge bars", 2, 12, 6)
-  params:add_number("cat_rupture_bars", "rupture bars", 2, 8, 4)
-  params:add_number("cat_dissolve_bars", "dissolve bars", 2, 16, 8)
-  params:set_action("cat_active", function(v) toggle_caterpillar(v == 2) end)
-  params:set_action("cat_aggression", function(v) cat_aggression = v end)
+  for _, sp in ipairs(SPECIES_ORDER) do
+    params:set_action("cat_" .. sp, function(v)
+      toggle_lagarta(sp, v == 2)
+    end)
+  end
 
   -- MIDI OUT
   params:add_group("midi_out", "MIDI OUT", 3)
@@ -501,8 +561,8 @@ function sim_clock()
       tape_reel_angle = (tape_reel_angle + math.abs(params:get("tape_rate")) * 0.1) % (math.pi * 2)
     end
 
-    -- caterpillar movement
-    if cat_active then update_caterpillar_visual() end
+    -- update all lagarta visuals
+    update_all_lagartas()
 
     -- patchbay modulation routing
     apply_patchbay_modulation()
@@ -570,189 +630,528 @@ function send_midi_click()
 end
 
 ------------------------------------------------------------
--- caterpillar bandmate (the living explorer)
+-- lagarta bandmates (multi-personality musical system)
 ------------------------------------------------------------
 
-function toggle_caterpillar(active)
-  cat_active = active
-  if active then
-    save_cat_anchors()
-    cat_phase = 1
-    cat_tick = 0
-    cat_pl = {
-      params:get("cat_drift_bars"),
-      params:get("cat_surge_bars"),
-      params:get("cat_rupture_bars"),
-      params:get("cat_dissolve_bars")
-    }
-    if cat_clock_id then clock.cancel(cat_clock_id) end
-    cat_clock_id = clock.run(caterpillar_clock)
+local function nudge(name, amount, lo, hi)
+  pcall(function()
+    params:set(name, util.clamp(params:get(name) + amount, lo, hi))
+  end)
+end
+
+local function set_safe(name, val)
+  pcall(function() params:set(name, val) end)
+end
+
+local function harmonic_freq(root_freq, intervals)
+  local ratio = intervals[math.random(1, #intervals)]
+  return root_freq * ratio
+end
+
+local function snap_freq_to_scale(freq)
+  -- find the nearest scale note frequency
+  if #scale_notes == 0 then return freq end
+  local best_freq = freq
+  local best_dist = math.huge
+  for _, note in ipairs(scale_notes) do
+    local nf = musicutil.note_num_to_freq(note)
+    -- check multiple octaves
+    for oct = -2, 3 do
+      local test = nf * (2 ^ oct)
+      local dist = math.abs(math.log(freq / test))
+      if dist < best_dist then
+        best_dist = dist
+        best_freq = test
+      end
+    end
+  end
+  return best_freq
+end
+
+function create_lagarta(species_key)
+  local sp = SPECIES[species_key]
+  if not sp then return nil end
+  local L = {
+    species = species_key,
+    spec = sp,
+    active = true,
+    tick = 0,
+    -- visual state
+    x = math.random(10, 118),
+    y = math.random(18, 55),
+    dx = (math.random() - 0.5) * 0.5,
+    dy = (math.random() - 0.5) * 0.3,
+    segments = {},
+    particles = {},
+    -- memory system
+    memory = {},
+    best_memory = nil,
+    -- clock
+    clock_id = nil,
+  }
+  -- init segments
+  for i = 1, sp.seg_count do
+    L.segments[i] = {x = L.x - (i - 1) * 3, y = L.y}
+  end
+  return L
+end
+
+function toggle_lagarta(species_key, on)
+  if on then
+    if lagartas[species_key] then return end -- already active
+    local L = create_lagarta(species_key)
+    if not L then return end
+    lagartas[species_key] = L
+    -- start thinking clock
+    L.clock_id = clock.run(function()
+      lagarta_think(species_key)
+    end)
   else
-    if cat_clock_id then
-      clock.cancel(cat_clock_id)
-      cat_clock_id = nil
+    local L = lagartas[species_key]
+    if L then
+      L.active = false
+      if L.clock_id then
+        pcall(function() clock.cancel(L.clock_id) end)
+        L.clock_id = nil
+      end
+      lagartas[species_key] = nil
     end
   end
 end
 
-function save_cat_anchors()
-  cat_anchors = {}
-  for i = 1, 5 do cat_anchors["q_freq" .. i] = params:get("q_freq" .. i) end
-  cat_anchors.q_cross = params:get("q_cross")
-  cat_anchors.q_fold = params:get("q_fold")
-  cat_anchors.chaos = params:get("chaos")
-  cat_anchors.click_rate = params:get("click_rate")
-  for i = 1, 4 do cat_anchors["gong" .. i] = params:get("gong" .. i) end
-  cat_anchors.gong_decay = params:get("gong_decay")
-  for i = 1, 4 do cat_anchors["rolz_r" .. i] = params:get("rolz_r" .. i) end
-end
+function lagarta_think(species_key)
+  local L = lagartas[species_key]
+  if not L then return end
+  local sp = L.spec
+  local agg_base = 0.5
 
-local function nudge(name, amount, lo, hi)
-  params:set(name, util.clamp(params:get(name) + amount, lo, hi))
-end
+  while L.active and lagartas[species_key] do
+    pcall(function() agg_base = params:get("cat_aggression") end)
+    local agg = agg_base
+    L.tick = L.tick + 1
 
-local function nudge_mul(name, factor, lo, hi)
-  params:set(name, util.clamp(params:get(name) * factor, lo, hi))
-end
-
-function caterpillar_clock()
-  while cat_active do
-    clock.sleep(math.max(clock.get_beat_sec(), 0.05))
-    cat_tick = cat_tick + 1
-
-    local agg = cat_aggression
-
-    -- phase-specific behavior
-    if cat_phase == 1 then -- DRIFT: gentle exploration
-      if math.random() < 0.3 then
+    --------------------------------------------
+    -- VERDE: melodic friend
+    --------------------------------------------
+    if species_key == "verde" then
+      -- tune quantussy oscillators to consonant intervals from root
+      if math.random() < 0.25 * agg then
+        local root = 36
+        pcall(function() root = params:get("q_freq1") end)
         local i = math.random(1, 5)
-        nudge_mul("q_freq" .. i, 0.98 + math.random() * 0.04, 20, 2000)
+        local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
+        target = util.clamp(target, 20, 2000)
+        -- gentle drift toward target
+        pcall(function()
+          local cur = params:get("q_freq" .. i)
+          set_safe("q_freq" .. i, cur + (target - cur) * 0.15 * agg)
+        end)
       end
-      if math.random() < 0.1 then nudge("q_cross", (math.random() - 0.5) * 0.02 * agg, 0, 1) end
-      if math.random() < 0.1 then nudge("q_fold", (math.random() - 0.5) * 0.02 * agg, 0, 1) end
-      cat_speed = 0.2
-
-    elseif cat_phase == 2 then -- SURGE: building
-      if math.random() < 0.5 then
-        local i = math.random(1, 5)
-        nudge_mul("q_freq" .. i, 0.95 + math.random() * 0.1, 20, 2000)
+      -- prefer long click decays (melodic)
+      if math.random() < 0.15 * agg then
+        local dec = sp.click_decay_range[1] + math.random() * (sp.click_decay_range[2] - sp.click_decay_range[1])
+        set_safe("click_decay", dec)
       end
-      nudge("q_cross", 0.01 * agg, 0, 1)
-      nudge("q_fold", 0.01 * agg, 0, 1)
-      if math.random() < 0.3 then nudge("click_rate", 0.2 * agg, 0.1, 40) end
-      if math.random() < 0.2 then nudge("rolz_to_click", 0.02 * agg, 0, 1) end
-      if math.random() < 0.2 then nudge("rolz_cascade", 0.01 * agg, 0, 1) end
-      -- bass surges: increase weight
-      if math.random() < 0.2 then nudge("sub_level", 0.02 * agg, 0, 1) end
-      if math.random() < 0.2 then nudge("bass_click_amp", 0.02 * agg, 0, 1) end
-      if math.random() < 0.15 then nudge_mul("bass_freq", 0.95 + math.random() * 0.1, 20, 200) end
-      cat_speed = 0.5
-
-    elseif cat_phase == 3 then -- RUPTURE: maximum chaos
-      if math.random() < 0.7 then
-        local i = math.random(1, 5)
-        nudge_mul("q_freq" .. i, 0.85 + math.random() * 0.3, 20, 2000)
-      end
-      nudge("q_fold", 0.03 * agg, 0, 1)
-      nudge("chaos", 0.02 * agg, 0, 1)
-      if math.random() < 0.4 then nudge("click_rate", (math.random() - 0.3) * 2 * agg, 0.1, 40) end
-      -- bass goes wild: pitch shifts, level spikes
-      if math.random() < 0.3 then nudge_mul("bass_click_pitch", 0.8 + math.random() * 0.4, 20, 400) end
-      if math.random() < 0.3 then nudge_mul("sub_freq", 0.85 + math.random() * 0.3, 15, 200) end
-      if math.random() < 0.2 then nudge("bass_click_decay", (math.random() - 0.5) * 0.03 * agg, 0.01, 0.5) end
-      if math.random() < 0.3 then
-        local gi = math.random(1, 4)
-        nudge_mul("gong" .. gi, 0.9 + math.random() * 0.2, 50, 5000)
-      end
-      if math.random() < 0.15 then do_chaos_burst() end
-      -- randomly patch/unpatch in patchbay
+      -- keep fold and chaos low
       if math.random() < 0.1 then
+        local fold_target = sp.fold_range[1] + math.random() * (sp.fold_range[2] - sp.fold_range[1])
+        nudge("q_fold", (fold_target - (params:get("q_fold") or 0.3)) * 0.1 * agg, 0, 1)
+      end
+      if math.random() < 0.1 then
+        local chaos_target = sp.chaos_range[1] + math.random() * (sp.chaos_range[2] - sp.chaos_range[1])
+        nudge("chaos", (chaos_target - (params:get("chaos") or 0.3)) * 0.08 * agg, 0, 1)
+      end
+      -- bass tracks scale notes at lower octaves
+      if math.random() < 0.2 * agg and #scale_notes > 0 then
+        local note = scale_notes[math.random(1, math.min(5, #scale_notes))]
+        local bass_freq = musicutil.note_num_to_freq(math.max(note - 12, 20))
+        set_safe("bass_freq", util.clamp(bass_freq, 20, 200))
+        set_safe("sub_freq", util.clamp(musicutil.note_num_to_freq(math.max(note - 24, 15)), 15, 200))
+      end
+      -- boost sub gently
+      if math.random() < 0.1 then
+        nudge("sub_level", sp.sub_love * 0.02 * agg, 0, 1)
+      end
+      -- gongs tuned to harmonics
+      if math.random() < 0.12 * agg then
+        local gi = math.random(1, 4)
+        local root = 80
+        pcall(function() root = params:get("gong1") end)
+        local target = harmonic_freq(root, sp.intervals)
+        target = util.clamp(target, 50, 5000)
+        pcall(function()
+          local cur = params:get("gong" .. gi)
+          set_safe("gong" .. gi, cur + (target - cur) * 0.12 * agg)
+        end)
+      end
+      -- gong decay in species range
+      if math.random() < 0.08 then
+        local dec = sp.gong_decay_range[1] + math.random() * (sp.gong_decay_range[2] - sp.gong_decay_range[1])
+        set_safe("gong_decay", dec)
+      end
+
+    --------------------------------------------
+    -- VENENOSA: venomous chaos
+    --------------------------------------------
+    elseif species_key == "venenosa" then
+      -- detune to dissonant intervals
+      if math.random() < 0.4 * agg then
+        local i = math.random(1, 5)
+        local root = 100 + math.random() * 400
+        pcall(function() root = params:get("q_freq1") end)
+        local target = harmonic_freq(root, sp.intervals)
+        target = util.clamp(target, 20, 2000)
+        set_safe("q_freq" .. i, target)
+      end
+      -- push fold and chaos high
+      if math.random() < 0.3 * agg then
+        local fold_target = sp.fold_range[1] + math.random() * (sp.fold_range[2] - sp.fold_range[1])
+        nudge("q_fold", (fold_target - (params:get("q_fold") or 0.5)) * 0.2 * agg, 0, 1)
+      end
+      if math.random() < 0.25 * agg then
+        local chaos_target = sp.chaos_range[1] + math.random() * (sp.chaos_range[2] - sp.chaos_range[1])
+        nudge("chaos", (chaos_target - (params:get("chaos") or 0.3)) * 0.15 * agg, 0, 1)
+      end
+      -- short harsh clicks
+      if math.random() < 0.2 * agg then
+        local dec = sp.click_decay_range[1] + math.random() * (sp.click_decay_range[2] - sp.click_decay_range[1])
+        set_safe("click_decay", dec)
+      end
+      -- erratic rate changes
+      if math.random() < 0.25 * agg then
+        nudge("click_rate", (math.random() - 0.3) * 4 * agg, 0.1, 40)
+      end
+      -- occasional chaos bursts
+      if math.random() < 0.06 * agg then
+        do_chaos_burst()
+      end
+      -- mess with patchbay connections
+      if math.random() < 0.08 * agg then
         local s = math.random(1, #MOD_SRC_NAMES)
         local d = math.random(1, #MOD_DST_NAMES)
-        patch[s][d] = math.random(0, 2)
+        patch[s][d] = math.random(0, 3)
         grid_dirty = true
       end
-      cat_speed = 1.2
+      -- dissonant gong tuning
+      if math.random() < 0.15 * agg then
+        local gi = math.random(1, 4)
+        local root = 200 + math.random() * 800
+        local target = harmonic_freq(root, sp.intervals)
+        set_safe("gong" .. gi, util.clamp(target, 50, 5000))
+      end
+      -- short gong decay
+      if math.random() < 0.1 then
+        local dec = sp.gong_decay_range[1] + math.random() * (sp.gong_decay_range[2] - sp.gong_decay_range[1])
+        set_safe("gong_decay", dec)
+      end
+      -- bass: harsh pitch shifts
+      if math.random() < 0.15 * agg then
+        set_safe("bass_click_pitch", 20 + math.random() * 380)
+      end
 
-    elseif cat_phase == 4 then -- DISSOLVE: return to calm
-      for i = 1, 5 do
-        local anchor = cat_anchors["q_freq" .. i] or params:get("q_freq" .. i)
-        local cur = params:get("q_freq" .. i)
-        params:set("q_freq" .. i, cur + (anchor - cur) * 0.05 * agg)
+    --------------------------------------------
+    -- SEDA: silk ambient
+    --------------------------------------------
+    elseif species_key == "seda" then
+      -- very slow drift toward consonance
+      if math.random() < 0.12 * agg then
+        local i = math.random(1, 5)
+        local root = 36
+        pcall(function() root = params:get("q_freq1") end)
+        local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
+        target = util.clamp(target, 20, 2000)
+        pcall(function()
+          local cur = params:get("q_freq" .. i)
+          set_safe("q_freq" .. i, cur + (target - cur) * 0.04 * agg)
+        end)
       end
-      nudge("q_cross", -0.01 * agg, 0, 1)
-      nudge("q_fold", -0.015 * agg, 0, 1)
-      nudge("chaos", -0.01 * agg, 0, 1)
-      nudge("click_rate", -0.1 * agg, 0.1, 40)
-      nudge("rolz_to_click", -0.02 * agg, 0, 1)
-      -- gongs drift back
-      for i = 1, 4 do
-        local anchor = cat_anchors["gong" .. i] or params:get("gong" .. i)
-        local cur = params:get("gong" .. i)
-        params:set("gong" .. i, cur + (anchor - cur) * 0.04 * agg)
+      -- minimal fold, lowest chaos
+      if math.random() < 0.08 then
+        local fold_target = sp.fold_range[1] + math.random() * (sp.fold_range[2] - sp.fold_range[1])
+        nudge("q_fold", (fold_target - (params:get("q_fold") or 0.3)) * 0.05 * agg, 0, 1)
       end
-      cat_speed = 0.15
+      if math.random() < 0.08 then
+        local chaos_target = sp.chaos_range[1] + math.random() * (sp.chaos_range[2] - sp.chaos_range[1])
+        nudge("chaos", (chaos_target - (params:get("chaos") or 0.3)) * 0.04 * agg, 0, 1)
+      end
+      -- maximum gong decay (long resonance)
+      if math.random() < 0.1 then
+        local dec = sp.gong_decay_range[1] + math.random() * (sp.gong_decay_range[2] - sp.gong_decay_range[1])
+        set_safe("gong_decay", dec)
+      end
+      -- boost sub, quiet clicks
+      if math.random() < 0.1 then
+        nudge("sub_level", sp.sub_love * 0.03 * agg, 0, 1)
+      end
+      if math.random() < 0.08 then
+        nudge("click_amp", -0.02 * agg, 0, 1)
+      end
+      -- long click decays
+      if math.random() < 0.1 then
+        local dec = sp.click_decay_range[1] + math.random() * (sp.click_decay_range[2] - sp.click_decay_range[1])
+        set_safe("click_decay", dec)
+      end
+      -- engage tape feedback if playing
+      if tape_playing and math.random() < 0.05 * agg then
+        nudge("tape_feedback", 0.02 * agg, 0, 0.95)
+      end
+      -- gongs: gentle harmonic tuning
+      if math.random() < 0.08 * agg then
+        local gi = math.random(1, 4)
+        local root = 80
+        pcall(function() root = params:get("gong1") end)
+        local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
+        target = util.clamp(target, 50, 5000)
+        pcall(function()
+          local cur = params:get("gong" .. gi)
+          set_safe("gong" .. gi, cur + (target - cur) * 0.06 * agg)
+        end)
+      end
+      -- bass: track scale at low octaves
+      if math.random() < 0.08 * agg and #scale_notes > 0 then
+        local note = scale_notes[math.random(1, math.min(3, #scale_notes))]
+        set_safe("bass_freq", util.clamp(musicutil.note_num_to_freq(math.max(note - 24, 15)), 20, 200))
+      end
+
+    --------------------------------------------
+    -- FOGO: fire rhythm
+    --------------------------------------------
+    elseif species_key == "fogo" then
+      -- click rate locked to polyrhythmic ratios
+      if math.random() < 0.2 * agg then
+        local base_rate = 2
+        pcall(function() base_rate = params:get("click_rate") end)
+        local ratio = POLY_RATIOS[math.random(1, #POLY_RATIOS)]
+        local target = util.clamp(base_rate * ratio, 0.1, 40)
+        set_safe("click_rate", target)
+      end
+      -- rolz rates set to polyrhythmic ratios of each other
+      if math.random() < 0.25 * agg then
+        local base_r = 1
+        pcall(function() base_r = params:get("rolz_r1") end)
+        local i = math.random(2, 4)
+        local ratio = POLY_RATIOS[math.random(1, #POLY_RATIOS)]
+        set_safe("rolz_r" .. i, util.clamp(base_r * ratio, 0.01, 20))
+      end
+      -- increase rolz_to_click and cascade
+      if math.random() < 0.2 * agg then
+        nudge("rolz_to_click", 0.03 * agg, 0, 1)
+      end
+      if math.random() < 0.15 * agg then
+        nudge("rolz_cascade", 0.025 * agg, 0, 1)
+      end
+      -- short percussive decays
+      if math.random() < 0.15 * agg then
+        local dec = sp.click_decay_range[1] + math.random() * (sp.click_decay_range[2] - sp.click_decay_range[1])
+        set_safe("click_decay", dec)
+      end
+      -- fold and chaos in species range
+      if math.random() < 0.15 then
+        local fold_target = sp.fold_range[1] + math.random() * (sp.fold_range[2] - sp.fold_range[1])
+        nudge("q_fold", (fold_target - (params:get("q_fold") or 0.3)) * 0.12 * agg, 0, 1)
+      end
+      if math.random() < 0.12 then
+        local chaos_target = sp.chaos_range[1] + math.random() * (sp.chaos_range[2] - sp.chaos_range[1])
+        nudge("chaos", (chaos_target - (params:get("chaos") or 0.3)) * 0.1 * agg, 0, 1)
+      end
+      -- bass body tuned to scale, rhythmic
+      if math.random() < 0.15 * agg and #scale_notes > 0 then
+        local note = scale_notes[math.random(1, math.min(7, #scale_notes))]
+        local bass_freq = musicutil.note_num_to_freq(math.max(note - 12, 20))
+        set_safe("bass_freq", util.clamp(bass_freq, 20, 200))
+        set_safe("bass_click_pitch", util.clamp(bass_freq * 1.5, 20, 400))
+      end
+      -- gong tuning: percussive
+      if math.random() < 0.1 * agg then
+        local gi = math.random(1, 4)
+        local root = 150
+        pcall(function() root = params:get("gong1") end)
+        local target = harmonic_freq(root, sp.intervals)
+        set_safe("gong" .. gi, util.clamp(target, 50, 5000))
+      end
+      -- gong decay: short to medium
+      if math.random() < 0.08 then
+        local dec = sp.gong_decay_range[1] + math.random() * (sp.gong_decay_range[2] - sp.gong_decay_range[1])
+        set_safe("gong_decay", dec)
+      end
+      -- quantussy: tune to scale with snap
+      if math.random() < 0.15 * agg then
+        local i = math.random(1, 5)
+        local root = 55
+        pcall(function() root = params:get("q_freq1") end)
+        local target = snap_freq_to_scale(harmonic_freq(root, sp.intervals))
+        target = util.clamp(target, 20, 2000)
+        set_safe("q_freq" .. i, target)
+      end
     end
 
-    -- phase transition
-    if cat_tick >= cat_pl[cat_phase] * 4 then
-      cat_tick = 0
-      cat_phase = (cat_phase % 4) + 1
-      cat_pl[cat_phase] = util.clamp(
-        params:get("cat_" .. string.lower(PHASE_NAMES[cat_phase]) .. "_bars")
-          + math.random(-2, 2), 2, 16)
-      if cat_phase == 1 then save_cat_anchors() end
+    --------------------------------------------
+    -- memory system: save snapshot every 16 ticks
+    --------------------------------------------
+    if L.tick % 16 == 0 then
+      local snapshot = {}
+      pcall(function()
+        for i = 1, 5 do snapshot["q_freq" .. i] = params:get("q_freq" .. i) end
+        snapshot.q_cross = params:get("q_cross")
+        snapshot.q_fold = params:get("q_fold")
+        snapshot.chaos = params:get("chaos")
+        snapshot.click_rate = params:get("click_rate")
+        snapshot.click_decay = params:get("click_decay")
+        for i = 1, 4 do snapshot["gong" .. i] = params:get("gong" .. i) end
+        snapshot.gong_decay = params:get("gong_decay")
+        for i = 1, 4 do snapshot["rolz_r" .. i] = params:get("rolz_r" .. i) end
+        snapshot.rolz_cascade = params:get("rolz_cascade")
+        snapshot.rolz_to_click = params:get("rolz_to_click")
+      end)
+      table.insert(L.memory, snapshot)
+      if #L.memory > 32 then table.remove(L.memory, 1) end
+      -- occasionally mark as "best" (random preference)
+      if math.random() < 0.15 then
+        L.best_memory = snapshot
+      end
     end
+
+    -- occasionally recall a good configuration
+    if L.best_memory and math.random() < 0.03 * agg and L.tick > 32 then
+      local mem = L.best_memory
+      for k, v in pairs(mem) do
+        pcall(function()
+          local cur = params:get(k)
+          set_safe(k, cur + (v - cur) * 0.2 * agg)
+        end)
+      end
+    end
+
+    -- sleep based on rhythm style
+    local sleep_time
+    if sp.rhythm_style == "steady" then
+      sleep_time = math.max(clock.get_beat_sec(), 0.05)
+    elseif sp.rhythm_style == "erratic" then
+      sleep_time = math.max(clock.get_beat_sec() * (0.3 + math.random() * 1.4), 0.05)
+    elseif sp.rhythm_style == "sparse" then
+      sleep_time = math.max(clock.get_beat_sec() * (1.5 + math.random() * 2.0), 0.05)
+    elseif sp.rhythm_style == "polyrhythm" then
+      local ratio = POLY_RATIOS[math.random(1, #POLY_RATIOS)]
+      sleep_time = math.max(clock.get_beat_sec() * ratio, 0.05)
+    else
+      sleep_time = math.max(clock.get_beat_sec(), 0.05)
+    end
+    clock.sleep(sleep_time)
   end
 end
 
-function update_caterpillar_visual()
-  -- caterpillar movement based on phase
-  local wobble = cat_speed * (1 + cat_phase * 0.3)
+function update_all_lagartas()
+  for species_key, L in pairs(lagartas) do
+    if L and L.active then
+      local sp = L.spec
 
-  -- head direction changes
-  cat_dx = cat_dx + (math.random() - 0.5) * wobble * 0.15
-  cat_dy = cat_dy + (math.random() - 0.5) * wobble * 0.15
-  cat_dx = util.clamp(cat_dx, -1.5, 1.5)
-  cat_dy = util.clamp(cat_dy, -0.8, 0.8)
+      -- movement
+      local wobble = sp.speed * 0.5
 
-  -- RUPTURE: erratic
-  if cat_phase == 3 then
-    cat_dx = cat_dx + (math.random() - 0.5) * 0.8
-    cat_dy = cat_dy + (math.random() - 0.5) * 0.4
-  end
-  -- DISSOLVE: curl up
-  if cat_phase == 4 then
-    cat_dx = cat_dx * 0.95
-    cat_dy = cat_dy * 0.95
-    -- drift toward center
-    cat_dx = cat_dx + (64 - cat_x) * 0.002
-    cat_dy = cat_dy + (38 - cat_y) * 0.002
-  end
+      -- species-specific movement style
+      if species_key == "verde" then
+        -- gentle sine-wave undulation
+        L.dx = L.dx + math.sin(frame * 0.03) * wobble * 0.08
+        L.dy = L.dy + math.cos(frame * 0.025) * wobble * 0.06
+      elseif species_key == "venenosa" then
+        -- jagged movement
+        L.dx = L.dx + (math.random() - 0.5) * wobble * 0.4
+        L.dy = L.dy + (math.random() - 0.5) * wobble * 0.3
+      elseif species_key == "seda" then
+        -- floating motion
+        L.dx = L.dx + math.sin(frame * 0.012 + 1.7) * wobble * 0.03
+        L.dy = L.dy + math.cos(frame * 0.01 + 0.5) * wobble * 0.025
+      elseif species_key == "fogo" then
+        -- bouncy
+        L.dx = L.dx + (math.random() - 0.5) * wobble * 0.25
+        L.dy = L.dy + math.sin(frame * 0.08) * wobble * 0.2
+      end
 
-  cat_x = cat_x + cat_dx
-  cat_y = cat_y + cat_dy
+      L.dx = util.clamp(L.dx, -1.2, 1.2)
+      L.dy = util.clamp(L.dy, -0.7, 0.7)
 
-  -- bounce off edges
-  if cat_x < 4 then cat_x = 4; cat_dx = math.abs(cat_dx) end
-  if cat_x > 124 then cat_x = 124; cat_dx = -math.abs(cat_dx) end
-  if cat_y < 14 then cat_y = 14; cat_dy = math.abs(cat_dy) end
-  if cat_y > 60 then cat_y = 60; cat_dy = -math.abs(cat_dy) end
+      L.x = L.x + L.dx
+      L.y = L.y + L.dy
 
-  -- update segments (follow the head)
-  cat_segments[1].x = cat_x
-  cat_segments[1].y = cat_y
-  for i = 2, NUM_SEGMENTS do
-    local prev = cat_segments[i-1]
-    local seg = cat_segments[i]
-    local dx = prev.x - seg.x
-    local dy = prev.y - seg.y
-    local dist = math.sqrt(dx*dx + dy*dy)
-    local spacing = 3.5
-    if dist > spacing then
-      local ratio = spacing / dist
-      seg.x = prev.x - dx * ratio
-      seg.y = prev.y - dy * ratio
+      -- bounce off edges
+      if L.x < 4 then L.x = 4; L.dx = math.abs(L.dx) end
+      if L.x > 124 then L.x = 124; L.dx = -math.abs(L.dx) end
+      if L.y < 14 then L.y = 14; L.dy = math.abs(L.dy) end
+      if L.y > 56 then L.y = 56; L.dy = -math.abs(L.dy) end
+
+      -- update segments (follow the head)
+      L.segments[1].x = L.x
+      L.segments[1].y = L.y
+      for i = 2, sp.seg_count do
+        if L.segments[i] then
+          local prev = L.segments[i-1]
+          local seg = L.segments[i]
+          local sdx = prev.x - seg.x
+          local sdy = prev.y - seg.y
+          local dist = math.sqrt(sdx * sdx + sdy * sdy)
+          local spacing = species_key == "seda" and 2.5 or 3.5
+          if dist > spacing then
+            local ratio = spacing / dist
+            seg.x = prev.x - sdx * ratio
+            seg.y = prev.y - sdy * ratio
+          end
+        end
+      end
+
+      -- particles (venenosa sparks, seda dust, fogo sparks)
+      if species_key == "venenosa" and math.random() < 0.3 then
+        table.insert(L.particles, {
+          x = L.x + math.random(-4, 4),
+          y = L.y + math.random(-4, 4),
+          life = 8 + math.random(0, 6),
+          kind = "spark"
+        })
+      elseif species_key == "seda" and math.random() < 0.4 then
+        local tail = L.segments[sp.seg_count]
+        if tail then
+          table.insert(L.particles, {
+            x = tail.x + (math.random() - 0.5) * 3,
+            y = tail.y + (math.random() - 0.5) * 2,
+            life = 12 + math.random(0, 8),
+            kind = "dust"
+          })
+        end
+      elseif species_key == "fogo" and math.random() < 0.35 then
+        table.insert(L.particles, {
+          x = L.x + math.random(-3, 3),
+          y = L.y + math.random(-5, 2),
+          life = 5 + math.random(0, 4),
+          kind = "fire"
+        })
+      end
+
+      -- decay particles
+      local new_particles = {}
+      for _, p in ipairs(L.particles) do
+        p.life = p.life - 1
+        if p.kind == "dust" then
+          p.y = p.y - 0.1
+          p.x = p.x + (math.random() - 0.5) * 0.3
+        elseif p.kind == "fire" then
+          p.y = p.y - 0.3
+          p.x = p.x + (math.random() - 0.5) * 0.5
+        elseif p.kind == "spark" then
+          p.x = p.x + (math.random() - 0.5) * 0.8
+          p.y = p.y + (math.random() - 0.5) * 0.8
+        end
+        if p.life > 0 then
+          table.insert(new_particles, p)
+        end
+      end
+      L.particles = new_particles
+      -- cap particles
+      if #L.particles > 30 then
+        local trimmed = {}
+        for i = #L.particles - 29, #L.particles do
+          table.insert(trimmed, L.particles[i])
+        end
+        L.particles = trimmed
+      end
     end
   end
 end
@@ -947,11 +1346,12 @@ function enc(n, d)
     if n == 2 then params:delta("tape_rate", d)
     elseif n == 3 then params:delta("tape_slide", d) end
   elseif page == 6 then
-    if n == 2 then params:delta("cat_aggression", d)
+    if n == 2 then
+      -- cycle selected caterpillar
+      cat_selected = util.clamp(cat_selected + d, 1, #SPECIES_ORDER)
     elseif n == 3 then
-      -- cycle phase bar lengths
-      local p = PHASE_NAMES[cat_phase]
-      params:delta("cat_" .. string.lower(p) .. "_bars", d)
+      -- adjust aggression
+      params:delta("cat_aggression", d)
     end
   end
 end
@@ -968,8 +1368,11 @@ function key(n, z)
         tape_start_recording()
       end
     elseif page == 6 then
-      -- toggle caterpillar
-      params:set("cat_active", cat_active and 1 or 2)
+      -- toggle selected caterpillar on/off
+      local sp_key = SPECIES_ORDER[cat_selected]
+      local param_name = "cat_" .. sp_key
+      local current = params:get(param_name)
+      params:set(param_name, current == 1 and 2 or 1)
     else
       -- manual click
       if params:get("music_mode") == 2 then
@@ -1029,7 +1432,7 @@ function redraw()
   elseif page == 3 then draw_gongs()
   elseif page == 4 then draw_rolz()
   elseif page == 5 then draw_tape()
-  elseif page == 6 then draw_caterpillar() end
+  elseif page == 6 then draw_lagartas() end
 
   -- chaos burst sparks
   if chaos_burst > 0.05 then
@@ -1040,14 +1443,20 @@ function redraw()
     screen.fill()
   end
 
-  -- caterpillar active indicator (small worm on all pages)
-  if cat_active and page ~= 6 then
-    screen.level(4 + math.floor(math.sin(frame * 0.15) * 3))
-    local ix = 122 + math.sin(frame * 0.1) * 2
-    screen.circle(ix, 4, 1.5)
-    screen.fill()
-    screen.circle(ix + 3, 4 + math.sin(frame * 0.2), 1)
-    screen.fill()
+  -- lagarta active indicator (small worms on all pages)
+  if page ~= 6 then
+    local any_active = false
+    for _, sp_key in ipairs(SPECIES_ORDER) do
+      if lagartas[sp_key] then any_active = true; break end
+    end
+    if any_active then
+      screen.level(4 + math.floor(math.sin(frame * 0.15) * 3))
+      local ix = 122 + math.sin(frame * 0.1) * 2
+      screen.circle(ix, 4, 1.5)
+      screen.fill()
+      screen.circle(ix + 3, 4 + math.sin(frame * 0.2), 1)
+      screen.fill()
+    end
   end
 
   -- grid mode indicator
@@ -1320,115 +1729,244 @@ function draw_tape()
 end
 
 ------------------------------------------------------------
--- page 6: LAGARTA (the caterpillar)
+-- page 6: LAGARTAS (multi-personality caterpillars)
 ------------------------------------------------------------
 
-function draw_caterpillar()
-  if not cat_active then
-    -- sleeping caterpillar
+function draw_lagartas()
+  -- count active
+  local any_active = false
+  for _, sp_key in ipairs(SPECIES_ORDER) do
+    if lagartas[sp_key] then any_active = true; break end
+  end
+
+  if not any_active then
+    -- sleeping state
     screen.level(4)
     screen.font_size(8)
-    screen.move(30, 35)
-    screen.text("K2 to wake the")
-    screen.move(30, 46)
-    screen.text("caterpillar")
+    screen.move(20, 30)
+    screen.text("K2 to wake a lagarta")
+    screen.move(20, 42)
+    screen.text("E2 select  E3 aggression")
+    -- show species selector
+    for i, sp_key in ipairs(SPECIES_ORDER) do
+      local sp = SPECIES[sp_key]
+      local sel = (i == cat_selected)
+      screen.level(sel and 12 or 3)
+      screen.move(2 + (i - 1) * 32, 56)
+      screen.font_size(6)
+      screen.text(sp.name)
+    end
     -- small sleeping worm
     for i = 1, 6 do
       local bri = math.floor(2 + math.sin(frame * 0.05 + i * 0.5) * 1.5)
       screen.level(util.clamp(bri, 1, 4))
-      screen.circle(50 + i * 4, 55 + math.sin(frame * 0.03 + i * 0.3) * 1, 2)
+      screen.circle(50 + i * 4, 18 + math.sin(frame * 0.03 + i * 0.3) * 1, 2)
       screen.fill()
     end
     return
   end
 
-  -- draw body segments
-  for i = NUM_SEGMENTS, 1, -1 do
-    local seg = cat_segments[i]
-    -- each segment brightness based on which param it represents
-    local param_intensity = 0
-    if i <= 5 then
-      param_intensity = math.abs(math.sin(q_phase[i])) -- quantussy oscs
-    elseif i == 6 then
-      param_intensity = click_flash
-    elseif i == 7 then
-      param_intensity = math.max(gong_rings[1], gong_rings[2])
-    elseif i == 8 then
-      param_intensity = params:get("chaos")
-    elseif i <= 10 then
-      param_intensity = rolz_flash[i - 8] or 0
+  -- draw each active lagarta
+  for _, sp_key in ipairs(SPECIES_ORDER) do
+    local L = lagartas[sp_key]
+    if L and L.active then
+      local sp = L.spec
+
+      -- draw particles first (behind body)
+      for _, p in ipairs(L.particles) do
+        if p.kind == "spark" then
+          screen.level(util.clamp(math.floor(p.life * 1.2), 1, 15))
+          screen.pixel(math.floor(p.x), math.floor(p.y))
+          screen.fill()
+        elseif p.kind == "dust" then
+          screen.level(util.clamp(math.floor(p.life * 0.3), 1, 4))
+          screen.pixel(math.floor(p.x), math.floor(p.y))
+          screen.fill()
+        elseif p.kind == "fire" then
+          screen.level(util.clamp(math.floor(p.life * 1.5), 1, 15))
+          screen.pixel(math.floor(p.x), math.floor(p.y))
+          screen.fill()
+          -- extra brightness near head
+          if p.life > 3 then
+            screen.pixel(math.floor(p.x) + 1, math.floor(p.y))
+            screen.fill()
+          end
+        end
+      end
+
+      -- draw body segments (species-specific shapes)
+      for i = sp.seg_count, 1, -1 do
+        local seg = L.segments[i]
+        if seg then
+          -- per-segment brightness
+          local param_intensity = 0
+          if i <= 5 then
+            param_intensity = math.abs(math.sin(q_phase[i] or 0))
+          elseif i == 6 then
+            param_intensity = click_flash
+          elseif i == 7 then
+            param_intensity = math.max(gong_rings[1] or 0, gong_rings[2] or 0)
+          elseif i <= 10 then
+            param_intensity = rolz_flash[i - 7] or 0
+          end
+
+          local bri = util.clamp(math.floor(sp.bright_base + param_intensity * 5
+            + math.sin(frame * 0.1 + i * 0.5) * 1.5), 1, 15)
+
+          if sp_key == "verde" then
+            -- round smooth segments (circles), gentle sine-wave undulation
+            screen.level(bri)
+            local r = i == 1 and 3.0 or (2.2 - i * 0.06)
+            local uy = seg.y + math.sin(frame * 0.06 + i * 0.5) * 1.5
+            screen.circle(seg.x, uy, math.max(r, 0.8))
+            screen.fill()
+
+          elseif sp_key == "venenosa" then
+            -- angular/spiky segments (diamonds)
+            screen.level(bri)
+            local r = i == 1 and 3.0 or (2.0 - i * 0.05)
+            r = math.max(r, 0.6)
+            local uy = seg.y + (math.random() - 0.5) * 1.5  -- jagged
+            -- diamond shape
+            screen.move(seg.x, uy - r)
+            screen.line(seg.x + r, uy)
+            screen.line(seg.x, uy + r)
+            screen.line(seg.x - r, uy)
+            screen.close()
+            screen.fill()
+
+          elseif sp_key == "seda" then
+            -- tiny ethereal segments (small dots)
+            screen.level(util.clamp(bri, 1, 6))
+            local r = i == 1 and 1.5 or 0.8
+            local uy = seg.y + math.sin(frame * 0.04 + i * 0.6) * 2.0
+            screen.circle(seg.x, uy, r)
+            screen.fill()
+
+          elseif sp_key == "fogo" then
+            -- pulsing segments that flash with rhythm
+            local pulse = click_flash * 3 + (rolz_flash[1] or 0) * 2
+            local final_bri = util.clamp(math.floor(bri + pulse * 3), 1, 15)
+            screen.level(final_bri)
+            local r = i == 1 and 2.8 or (2.0 - i * 0.07)
+            r = math.max(r, 0.6)
+            local bounce = math.abs(math.sin(frame * 0.1 + i * 0.4)) * 2.0
+            local uy = seg.y - bounce
+            screen.circle(seg.x, uy, r)
+            screen.fill()
+          end
+        end
+      end
+
+      -- draw antennae (species-specific)
+      local head = L.segments[1]
+      if head then
+        local ant_len = 4 + math.sin(frame * 0.12) * 1.5
+
+        if sp_key == "verde" then
+          -- soft antennae with round tips
+          screen.level(7)
+          local lax = head.x - ant_len * 0.6 + math.sin(frame * 0.1) * 1.5
+          local lay = head.y - 2 - ant_len + math.cos(frame * 0.13) * 1
+          local rax = head.x + ant_len * 0.6 + math.cos(frame * 0.09) * 1.5
+          local ray = head.y - 2 - ant_len + math.sin(frame * 0.11) * 1
+          screen.move(head.x, head.y - 2)
+          screen.line(lax, lay)
+          screen.stroke()
+          screen.move(head.x, head.y - 2)
+          screen.line(rax, ray)
+          screen.stroke()
+          screen.circle(lax, lay, 1)
+          screen.fill()
+          screen.circle(rax, ray, 1)
+          screen.fill()
+
+        elseif sp_key == "venenosa" then
+          -- sharp pointed antennae
+          screen.level(12)
+          local lax = head.x - ant_len * 0.8
+          local lay = head.y - 3 - ant_len * 1.2
+          local rax = head.x + ant_len * 0.8
+          local ray = head.y - 3 - ant_len * 1.2
+          screen.move(head.x - 1, head.y - 2)
+          screen.line(lax, lay)
+          screen.stroke()
+          screen.move(head.x + 1, head.y - 2)
+          screen.line(rax, ray)
+          screen.stroke()
+
+        elseif sp_key == "seda" then
+          -- barely visible thin antennae
+          screen.level(3)
+          screen.move(head.x, head.y - 1)
+          screen.line(head.x - 2 + math.sin(frame * 0.05) * 1, head.y - 3 - ant_len * 0.6)
+          screen.stroke()
+          screen.move(head.x, head.y - 1)
+          screen.line(head.x + 2 + math.cos(frame * 0.04) * 1, head.y - 3 - ant_len * 0.6)
+          screen.stroke()
+
+        elseif sp_key == "fogo" then
+          -- fiery antennae
+          screen.level(12)
+          local pulse = math.sin(frame * 0.15) * 2
+          screen.move(head.x, head.y - 2)
+          screen.line(head.x - ant_len * 0.5 + pulse, head.y - 3 - ant_len)
+          screen.stroke()
+          screen.move(head.x, head.y - 2)
+          screen.line(head.x + ant_len * 0.5 - pulse, head.y - 3 - ant_len)
+          screen.stroke()
+          -- sparks around head
+          if math.random() < 0.5 then
+            screen.level(util.clamp(math.floor(10 + math.random() * 5), 1, 15))
+            screen.pixel(head.x + math.random(-3, 3), head.y + math.random(-4, 1))
+            screen.fill()
+          end
+        end
+
+        -- eyes
+        screen.level(15)
+        screen.circle(head.x - 1.2, head.y - 0.5, 0.6)
+        screen.fill()
+        screen.circle(head.x + 1.2, head.y - 0.5, 0.6)
+        screen.fill()
+
+        -- species name label next to head
+        screen.level(util.clamp(sp.bright_base, 1, 10))
+        screen.font_size(6)
+        screen.move(head.x + 5, head.y - 3)
+        screen.text(sp.name)
+      end
     end
-
-    local base_bri = cat_phase == 3 and 8 or (cat_phase == 4 and 3 or 5)
-    local bri = util.clamp(math.floor(base_bri + param_intensity * 7
-      + math.sin(frame * 0.1 + i * 0.5) * 2), 1, 15)
-    screen.level(bri)
-
-    -- segment size: head is bigger
-    local r = i == 1 and 3.5 or (2.5 - i * 0.08)
-    -- body undulation
-    local uy = seg.y + math.sin(frame * 0.08 + i * 0.4) * (cat_speed * 1.5)
-    screen.circle(seg.x, uy, r)
-    screen.fill()
   end
 
-  -- head details: antennae
-  local head = cat_segments[1]
-  local ant_len = 5 + math.sin(frame * 0.12) * 2
-  screen.level(cat_phase == 3 and 12 or 7)
-  -- left antenna
-  screen.move(head.x, head.y - 3)
-  screen.line(head.x - ant_len * 0.7 + math.sin(frame * 0.15) * 2,
-              head.y - 3 - ant_len + math.cos(frame * 0.18) * 1.5)
-  screen.stroke()
-  -- right antenna
-  screen.move(head.x, head.y - 3)
-  screen.line(head.x + ant_len * 0.7 + math.cos(frame * 0.13) * 2,
-              head.y - 3 - ant_len + math.sin(frame * 0.16) * 1.5)
-  screen.stroke()
-  -- antenna tips
-  screen.circle(head.x - ant_len * 0.7 + math.sin(frame * 0.15) * 2,
-                head.y - 3 - ant_len + math.cos(frame * 0.18) * 1.5, 1)
-  screen.fill()
-  screen.circle(head.x + ant_len * 0.7 + math.cos(frame * 0.13) * 2,
-                head.y - 3 - ant_len + math.sin(frame * 0.16) * 1.5, 1)
-  screen.fill()
+  -- bottom bar: show which species are active, selected species highlighted
+  screen.font_size(6)
+  for i, sp_key in ipairs(SPECIES_ORDER) do
+    local sp = SPECIES[sp_key]
+    local is_active = lagartas[sp_key] ~= nil
+    local is_sel = (i == cat_selected)
+    if is_active then
+      screen.level(is_sel and 15 or 8)
+    else
+      screen.level(is_sel and 6 or 2)
+    end
+    screen.move(1 + (i - 1) * 32, 63)
+    screen.text(sp.name)
+    if is_active then
+      -- small dot indicator
+      screen.level(sp.bright_base)
+      screen.circle(28 + (i - 1) * 32, 61, 1)
+      screen.fill()
+    end
+  end
 
-  -- eyes
-  screen.level(15)
-  screen.circle(head.x - 1.5, head.y - 1, 0.8)
-  screen.fill()
-  screen.circle(head.x + 1.5, head.y - 1, 0.8)
-  screen.fill()
-
-  -- phase name and progress
-  screen.level(15)
-  screen.font_size(8)
-  screen.move(2, 62)
-  screen.text(PHASE_NAMES[cat_phase])
-
-  -- progress bar
-  local progress = cat_tick / (cat_pl[cat_phase] * 4)
-  screen.level(4)
-  screen.rect(42, 58, 40, 4)
-  screen.stroke()
-  screen.level(cat_phase == 3 and 15 or 10)
-  screen.rect(42, 58, math.floor(progress * 40), 4)
-  screen.fill()
-
-  -- aggression
+  -- aggression display
   screen.level(6)
-  screen.move(88, 62)
-  screen.text(string.format("%.1f", cat_aggression))
-
-  -- RUPTURE particles
-  if cat_phase == 3 then
-    screen.level(math.floor(6 + math.random() * 6))
-    for _ = 1, 4 do
-      screen.pixel(head.x + math.random(-8, 8), head.y + math.random(-8, 8))
-    end
-    screen.fill()
-  end
+  screen.font_size(6)
+  local agg_val = 0.5
+  pcall(function() agg_val = params:get("cat_aggression") end)
+  screen.move(108, 11)
+  screen.text(string.format("%.1f", agg_val))
 end
 
 ------------------------------------------------------------
@@ -1436,7 +1974,16 @@ end
 ------------------------------------------------------------
 
 function cleanup()
-  if cat_clock_id then clock.cancel(cat_clock_id) end
+  -- stop all lagarta clocks
+  for sp_key, L in pairs(lagartas) do
+    if L and L.clock_id then
+      pcall(function() clock.cancel(L.clock_id) end)
+      L.clock_id = nil
+    end
+    if L then L.active = false end
+  end
+  lagartas = {}
+
   softcut.rec(1, 0)
   softcut.play(1, 0)
   softcut.play(2, 0)
